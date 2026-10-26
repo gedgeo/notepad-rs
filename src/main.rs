@@ -1116,7 +1116,7 @@ impl NotepadApp {
             if ui.button("+ Note").clicked() {
                 let tab = self.active_tab_mut();
                 let n = tab.mood_items.len() as f32;
-                tab.mood_items.push(session::MoodItem { text: "Nouvelle note".into(), x: 40.0 + n * 24.0, y: 40.0 + n * 24.0, color: (n as u8) % 4 });
+                tab.mood_items.push(session::MoodItem { text: "Nouvelle note".into(), image_path: None, x: 40.0 + n * 24.0, y: 40.0 + n * 24.0, width: 190.0, height: 130.0, color: (n as u8) % 4 });
                 tab.doc.dirty = true;
                 self.session_dirty = true;
             }
@@ -1129,7 +1129,10 @@ impl NotepadApp {
             egui::Area::new(id).fixed_pos(response.rect.min + egui::vec2(item.x, item.y)).movable(true).show(ctx, |ui| {
                 let fill = match item.color { 1 => egui::Color32::from_rgb(220, 240, 180), 2 => egui::Color32::from_rgb(190, 225, 250), 3 => egui::Color32::from_rgb(245, 205, 220), _ => egui::Color32::from_rgb(250, 235, 160) };
                 egui::Frame::NONE.fill(fill).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
-                    ui.add(egui::TextEdit::multiline(&mut item.text).desired_width(170.0).desired_rows(4));
+                    if let Some(path) = &item.image_path {
+                        ui.label(format!("Image : {}", std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy()));
+                    }
+                    ui.add(egui::TextEdit::multiline(&mut item.text).desired_width(item.width - 20.0).desired_rows(4));
                 });
             });
         }
@@ -2475,7 +2478,18 @@ impl eframe::App for NotepadApp {
                 .collect()
         });
         for path in dropped {
-            self.open_path(path);
+            let is_image = path.extension().and_then(|ext| ext.to_str()).map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp")).unwrap_or(false);
+            if self.active_tab().doc.moodboard && is_image {
+                let n = self.active_tab().mood_items.len() as f32;
+                self.active_tab_mut().mood_items.push(session::MoodItem {
+                    text: String::new(), image_path: Some(path.to_string_lossy().into_owned()),
+                    x: 50.0 + n * 24.0, y: 50.0 + n * 24.0, width: 240.0, height: 180.0, color: 0,
+                });
+                self.active_tab_mut().doc.dirty = true;
+                self.session_dirty = true;
+            } else {
+                self.open_path(path);
+            }
         }
 
         // Fermeture de la fenetre : demande de confirmation si necessaire.
