@@ -2608,6 +2608,21 @@ impl eframe::App for NotepadApp {
                 });
             }
         });
+        ui.separator();
+        ui.label("Backlinks");
+        let active_title = self.active_tab().page_title.clone();
+        let active_title = if active_title.is_empty() { self.active_tab().doc.title() } else { active_title };
+        let token = format!("[[{}]]", active_title);
+        let mut backlink_indices = Vec::new();
+        for (index, tab) in self.tabs.iter().enumerate() {
+            if index != self.active && tab.doc.text.contains(&token) { backlink_indices.push(index); }
+        }
+        if backlink_indices.is_empty() { ui.small("Aucune référence"); }
+        for index in backlink_indices {
+            let label = self.tabs[index].page_title.clone();
+            let label = if label.is_empty() { self.tabs[index].doc.title() } else { label };
+            if ui.selectable_label(false, format!("↗ {label}")).clicked() { page_to_select = Some(index); }
+        }
         if renamed_page { self.session_dirty = true; }
         if create_page { self.new_tab(); }
         if let Some(content) = template { self.new_tab(); self.active_tab_mut().doc.text = content.to_string(); self.active_tab_mut().doc.markdown = true; self.active_tab_mut().doc.dirty = true; self.session_dirty = true; }
