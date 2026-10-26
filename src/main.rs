@@ -2579,6 +2579,7 @@ impl eframe::App for NotepadApp {
         let mut page_to_select = None;
         let mut create_page = false;
         let mut create_child = false;
+        let mut template: Option<&str> = None;
         let known_page_ids: Vec<u64> = self.tabs.iter().map(|tab| tab.doc.id).collect();
         let mut renamed_page = false;
         egui::SidePanel::left("notion-pages-sidebar").resizable(true).default_width(230.0).show(ctx, |ui| {
@@ -2587,6 +2588,11 @@ impl eframe::App for NotepadApp {
             ui.separator();
             if ui.button("+ Nouvelle page").clicked() { create_page = true; }
             if ui.button("+ Sous-page").clicked() { create_child = true; }
+            ui.menu_button("Nouveau modèle", |ui| {
+                if ui.button("Notes structurées").clicked() { template = Some("# Notes\n\n## À retenir\n\n## Actions\n- "); ui.close(); }
+                if ui.button("Projet").clicked() { template = Some("# Projet\n\n## Objectif\n\n## Tâches\n- [ ] "); ui.close(); }
+                if ui.button("Réunion").clicked() { template = Some("# Réunion\n\nDate :\nParticipants :\n\n## Compte rendu\n"); ui.close(); }
+            });
             ui.add_space(4.0);
             for (index, tab) in self.tabs.iter_mut().enumerate() {
                 let query = self.page_search.to_lowercase();
@@ -2604,6 +2610,7 @@ impl eframe::App for NotepadApp {
         });
         if renamed_page { self.session_dirty = true; }
         if create_page { self.new_tab(); }
+        if let Some(content) = template { self.new_tab(); self.active_tab_mut().doc.text = content.to_string(); self.active_tab_mut().doc.markdown = true; self.active_tab_mut().doc.dirty = true; self.session_dirty = true; }
         if create_child {
             let parent = self.tabs.get(self.active).map(|tab| tab.doc.id);
             self.new_tab();
