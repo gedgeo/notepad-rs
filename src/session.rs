@@ -222,6 +222,7 @@ mod tests {
             mood_items: Vec::new(),
             page_id: 1,
             parent_id: None,
+            page_title: String::new(),
         });
         session.tabs.push(SessionTab {
             path: None,
