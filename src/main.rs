@@ -2607,7 +2607,6 @@ impl eframe::App for NotepadApp {
                     if ui.small_button(icon).clicked() { page_to_select = Some(index); }
                 });
             }
-        });
         ui.separator();
         ui.label("Backlinks");
         let active_title = self.active_tab().page_title.clone();
@@ -2623,6 +2622,7 @@ impl eframe::App for NotepadApp {
             let label = if label.is_empty() { self.tabs[index].doc.title() } else { label };
             if ui.selectable_label(false, format!("↗ {label}")).clicked() { page_to_select = Some(index); }
         }
+        });
         if renamed_page { self.session_dirty = true; }
         if create_page { self.new_tab(); }
         if let Some(content) = template { self.new_tab(); self.active_tab_mut().doc.text = content.to_string(); self.active_tab_mut().doc.markdown = true; self.active_tab_mut().doc.dirty = true; self.session_dirty = true; }
