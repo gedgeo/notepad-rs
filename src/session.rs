@@ -78,6 +78,21 @@ pub struct SessionTab {
     pub dirty: bool,
     /// Mode Markdown de l'onglet.
     pub markdown: bool,
+    pub moodboard: bool,
+    pub mood_items: Vec<MoodItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MoodItem {
+    pub text: String,
+    pub x: f32,
+    pub y: f32,
+    pub color: u8,
+}
+
+impl Default for MoodItem {
+    fn default() -> Self { Self { text: "Note".into(), x: 80.0, y: 80.0, color: 0 } }
 }
 
 pub fn encoding_code(encoding: Encoding) -> u8 {
@@ -191,6 +206,8 @@ mod tests {
             cursor: 42,
             dirty: false,
             markdown: true,
+            moodboard: false,
+            mood_items: Vec::new(),
         });
         session.tabs.push(SessionTab {
             path: None,
@@ -202,6 +219,8 @@ mod tests {
             cursor: 9,
             dirty: true,
             markdown: false,
+            moodboard: false,
+            mood_items: Vec::new(),
         });
         session
     }

@@ -88,6 +88,8 @@ pub struct Doc {
     pub font_size: f32,
     /// Mode Markdown : barre de mise en forme et aperçu disponibles.
     pub markdown: bool,
+    /// Onglet moodboard : la toile remplace l'éditeur texte.
+    pub moodboard: bool,
     /// Octets d'origine, conserves pour reinterpreter le fichier quand on
     /// change de codage sans l'avoir modifie (comportement Notepad).
     pub raw: Option<Vec<u8>>,
@@ -110,6 +112,7 @@ impl Doc {
             wrap: true,
             font_size: 15.0,
             markdown: false,
+            moodboard: false,
             raw: None,
             pending_selection: None,
             cursor_char: 0,
@@ -147,6 +150,7 @@ impl Doc {
             wrap: true,
             font_size: 15.0,
             markdown: false,
+            moodboard: false,
             raw: Some(bytes),
             pending_selection: None,
             cursor_char: 0,

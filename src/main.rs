@@ -207,6 +207,7 @@ struct Tab {
     doc: Doc,
     history: History,
     max_chars: usize,
+    mood_items: Vec<session::MoodItem>,
 }
 
 impl Tab {
@@ -215,6 +216,7 @@ impl Tab {
             doc: Doc::new(id),
             history: History::new(""),
             max_chars: 0,
+            mood_items: Vec::new(),
         }
     }
 
@@ -225,6 +227,7 @@ impl Tab {
             history: History::new(&doc.text),
             doc,
             max_chars,
+            mood_items: Vec::new(),
         })
     }
 
@@ -248,6 +251,7 @@ impl Tab {
 
 enum Action {
     New,
+    NewMoodboard,
     NewWindow,
     Open(Option<PathBuf>),
     Save,
@@ -562,10 +566,13 @@ impl NotepadApp {
                     history: History::new(&doc.text),
                     doc,
                     max_chars,
+                    mood_items: Vec::new(),
                 }
             }
             (None, None) => return None,
         };
+        tab.doc.moodboard = saved.moodboard;
+        tab.mood_items = saved.mood_items;
         // Un fichier relu sur disque peut avoir ete reinterprete dans un autre
         // codage sans etre modifie : on reapplique le choix de l'utilisateur.
         if tab.doc.encoding != encoding {
@@ -598,6 +605,17 @@ impl NotepadApp {
         let mut tab = Tab::new(id);
         tab.doc.wrap = self.default_wrap;
         tab.doc.font_size = self.default_font_size;
+        self.tabs.push(tab);
+        self.active = self.tabs.len() - 1;
+        self.session_dirty = true;
+    }
+
+    fn new_moodboard(&mut self) {
+        let mut tab = Tab::new(self.next_id);
+        self.next_id += 1;
+        tab.doc.moodboard = true;
+        tab.doc.dirty = true;
+        tab.mood_items.push(session::MoodItem::default());
         self.tabs.push(tab);
         self.active = self.tabs.len() - 1;
         self.session_dirty = true;
@@ -923,6 +941,8 @@ impl NotepadApp {
                 cursor: tab.doc.cursor_char,
                 dirty: tab.doc.dirty,
                 markdown: tab.doc.markdown,
+                moodboard: tab.doc.moodboard,
+                mood_items: tab.mood_items.clone(),
             })
             .collect();
         let window = ctx.input(|input| {
@@ -1090,6 +1110,31 @@ impl NotepadApp {
     }
 
     /// Apercu Markdown de l'onglet actif, cote a cote avec l'editeur.
+    fn moodboard_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.horizontal(|ui| {
+            ui.label("Moodboard");
+            if ui.button("+ Note").clicked() {
+                let tab = self.active_tab_mut();
+                let n = tab.mood_items.len() as f32;
+                tab.mood_items.push(session::MoodItem { text: "Nouvelle note".into(), x: 40.0 + n * 24.0, y: 40.0 + n * 24.0, color: (n as u8) % 4 });
+                tab.doc.dirty = true;
+                self.session_dirty = true;
+            }
+        });
+        let (response, _) = ui.allocate_painter(ui.available_size(), egui::Sense::hover());
+        let tab_id = self.active_tab().doc.id;
+        let tab = self.active_tab_mut();
+        for (index, item) in tab.mood_items.iter_mut().enumerate() {
+            let id = egui::Id::unique(("mood-item", tab_id, index));
+            egui::Area::new(id).fixed_pos(response.rect.min + egui::vec2(item.x, item.y)).movable(true).show(ctx, |ui| {
+                let fill = match item.color { 1 => egui::Color32::from_rgb(220, 240, 180), 2 => egui::Color32::from_rgb(190, 225, 250), 3 => egui::Color32::from_rgb(245, 205, 220), _ => egui::Color32::from_rgb(250, 235, 160) };
+                egui::Frame::NONE.fill(fill).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+                    ui.add(egui::TextEdit::multiline(&mut item.text).desired_width(170.0).desired_rows(4));
+                });
+            });
+        }
+    }
+
     fn markdown_preview_ui(&mut self, ui: &mut egui::Ui) {
         let blocks = markdown::parse(&self.active_tab().doc.text);
         let (regular, bold) = self.preview_fonts();
@@ -1761,6 +1806,7 @@ impl NotepadApp {
     fn handle_action(&mut self, ctx: &egui::Context, action: Action) {
         match action {
             Action::New => self.new_tab(),
+            Action::NewMoodboard => self.new_moodboard(),
             Action::NewWindow => Self::spawn_new_window(),
             Action::Open(path) => {
                 let path = path.or_else(|| {
@@ -2057,6 +2103,10 @@ impl NotepadApp {
             ui.menu_button("Fichier", |ui| {
                 if ui.button("Nouvel onglet       Ctrl+N").clicked() {
                     actions.push(Action::New);
+                    ui.close();
+                }
+                if ui.button("Nouveau moodboard").clicked() {
+                    actions.push(Action::NewMoodboard);
                     ui.close();
                 }
                 if ui.button("Nouvelle fenêtre    Ctrl+Maj+N").clicked() {
@@ -2511,6 +2561,10 @@ impl eframe::App for NotepadApp {
             if self.show_print_preview {
                 self.print_preview_ui(ui);
             } else {
+                if self.tabs[self.active].doc.moodboard {
+                    self.moodboard_ui(ui, &ctx);
+                    return;
+                }
                 let side_by_side =
                     self.tabs[self.active].doc.markdown && self.show_markdown_preview;
                 if side_by_side {
