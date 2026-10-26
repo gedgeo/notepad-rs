@@ -470,6 +470,7 @@ struct NotepadApp {
     /// texte ; on la retrouve ici pour appliquer le style au bon endroit.
     last_selection: Option<(u64, usize, usize)>,
     selected_mood_item: Option<usize>,
+    page_search: String,
 }
 
 impl NotepadApp {
@@ -2581,11 +2582,15 @@ impl eframe::App for NotepadApp {
         let known_page_ids: Vec<u64> = self.tabs.iter().map(|tab| tab.doc.id).collect();
         let mut renamed_page = false;
         egui::SidePanel::left("notion-pages-sidebar").resizable(true).default_width(230.0).show(ctx, |ui| {
-            ui.heading("Pages"); ui.separator();
+            ui.heading("Pages");
+            ui.add(egui::TextEdit::singleline(&mut self.page_search).hint_text("Rechercher…"));
+            ui.separator();
             if ui.button("+ Nouvelle page").clicked() { create_page = true; }
             if ui.button("+ Sous-page").clicked() { create_child = true; }
             ui.add_space(4.0);
             for (index, tab) in self.tabs.iter_mut().enumerate() {
+                let query = self.page_search.to_lowercase();
+                if !query.is_empty() && !tab.doc.title().to_lowercase().contains(&query) && !tab.doc.text.to_lowercase().contains(&query) { continue; }
                 let depth = tab.page_parent.map(|parent| if known_page_ids.contains(&parent) { 1 } else { 0 }).unwrap_or(0);
                 ui.horizontal(|ui| {
                     ui.add_space(depth as f32 * 18.0);
