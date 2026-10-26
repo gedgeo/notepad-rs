@@ -45,11 +45,12 @@ $cargoArgs = @($Task)
 if ($Task -eq "build" -and $Release) { $cargoArgs += "--release" }
 $cargoArgs += $Rest
 
-# cargo ecrit sa progression sur stderr : on desactive localement
-# l'arret sur erreur pour ne pas la confondre avec un echec.
-$previous = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-& cargo @cargoArgs 2>&1 | Out-Host
+# Cargo ecrit sa progression sur stderr, meme quand tout reussit.
+# Sous Windows PowerShell 5.1, `2>&1 | Out-Host` transforme ces lignes
+# en ErrorRecord (NativeCommandError). Laisser les flux natifs separes
+# conserve l'affichage normal et les diagnostics reels de Cargo.
+# PowerShell 7 : le code de retour, capture ci-dessous, fait autorite.
+$PSNativeCommandUseErrorActionPreference = $false
+& cargo @cargoArgs
 $code = $LASTEXITCODE
-$ErrorActionPreference = $previous
 exit $code
