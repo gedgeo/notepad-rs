@@ -1130,8 +1130,27 @@ impl NotepadApp {
                 let fill = match item.color { 1 => egui::Color32::from_rgb(220, 240, 180), 2 => egui::Color32::from_rgb(190, 225, 250), 3 => egui::Color32::from_rgb(245, 205, 220), _ => egui::Color32::from_rgb(250, 235, 160) };
                 egui::Frame::NONE.fill(fill).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
                     if let Some(path) = &item.image_path {
-                        ui.label(format!("Image : {}", std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy()));
+                        let filename = std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy();
+                        ui.label(format!("Image : {filename}"));
+                        if let Ok(bytes) = std::fs::read(path) {
+                            if let Ok(image) = image::load_from_memory(&bytes) {
+                                let rgba = image.to_rgba8();
+                                let size = [rgba.width() as usize, rgba.height() as usize];
+                                let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+                                let texture = ctx.load_texture(format!("mood-image-{tab_id}-{index}"), color, egui::TextureOptions::LINEAR);
+                                ui.image((texture.id(), egui::vec2(item.width - 20.0, item.height - 55.0).max(egui::vec2(40.0, 40.0))));
+                            } else {
+                                ui.label("Format d’image illisible");
+                            }
+                        } else {
+                            ui.label("Image introuvable");
+                        }
                     }
+                    ui.horizontal(|ui| {
+                        ui.label("Taille");
+                        ui.add(egui::DragValue::new(&mut item.width).range(80.0..=1200.0).speed(1.0));
+                        ui.add(egui::DragValue::new(&mut item.height).range(60.0..=900.0).speed(1.0));
+                    });
                     ui.add(egui::TextEdit::multiline(&mut item.text).desired_width(item.width - 20.0).desired_rows(4));
                 });
             });
