@@ -2,6 +2,10 @@
 
 final result: passed
 
+### Régression native corrigée après publication
+
+Le lancement utilisateur a révélé un verrou réentrant dans la sauvegarde de géométrie : `Context::input` contenait un appel à `Context::zoom_factor`. Les captures de démonstration ne sauvegardent pas et les anciens tests n'injectaient pas de `ViewportInfo::inner_rect`, ce qui avait masqué ce chemin. Le facteur d'échelle est désormais lu avant d'entrer dans la fermeture de lecture. Un test supplémentaire injecte une géométrie native, sauvegarde la session et vérifie sa taille et le texte restauré. Résultat : 94 tests réussis et compilation réussie. Les captures de disposition restent inchangées.
+
 ## Périmètre
 
 Les trois maquettes ont été validées ensemble : notes, blocs et moodboard. La cible est l'application Windows Rust/egui existante, pas un prototype web. L'évaluation porte sur cette adaptation native et ses interactions ; elle ne revendique pas une reproduction pixel par pixel ni une certification WCAG.

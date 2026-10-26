@@ -1,5 +1,9 @@
 # Fonctions de pages — 26 octobre 2026
 
+## Correctif de démarrage après refonte
+
+La sauvegarde de géométrie rappelait `Context::zoom_factor()` à l'intérieur de `Context::input()`, alors que le contexte était déjà verrouillé. Avec une fenêtre native, cela pouvait provoquer la panique de verrou après dix secondes et le code de sortie 101. Le facteur d'échelle est désormais lu avant la fermeture de lecture des entrées. Un test dédié sauvegarde une session avec une géométrie native non vide : 94 tests réussissent. Les sessions utilisateur ne sont pas supprimées ni réinitialisées par ce correctif.
+
 ## Livré
 
 Les options de page se trouvent dans le panneau droit. La navigation et le renommage restent dans le panneau gauche.

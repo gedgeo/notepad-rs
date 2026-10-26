@@ -1467,11 +1467,15 @@ impl NotepadApp {
                 workspace: tab.workspace.clone(),
             })
             .collect();
+        // Never call Context again from inside an input closure: it holds the
+        // context read lock. Native viewport geometry makes this branch run,
+        // unlike test inputs without an inner_rect.
+        let interface_scale = ctx.zoom_factor();
         let window = ctx.input(|input| {
             input.viewport().inner_rect.map(|rect| {
                 [
-                    rect.width() * ctx.zoom_factor(),
-                    rect.height() * ctx.zoom_factor(),
+                    rect.width() * interface_scale,
+                    rect.height() * interface_scale,
                 ]
             })
         });
@@ -1494,7 +1498,7 @@ impl NotepadApp {
             sync_baseline: self.sync_baseline.clone(),
             navigation_visible: self.design.sidebar,
             navigation_width: self.design.sidebar_width,
-            interface_scale: ctx.zoom_factor(),
+            interface_scale,
         }
     }
 
@@ -3459,6 +3463,44 @@ fn resolve_page(tabs: &[Tab], target: &str) -> Option<usize> {
 #[cfg(test)]
 mod workspace_tests {
     use super::*;
+
+    #[test]
+    fn session_save_with_native_window_geometry_does_not_reenter_context_lock() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let path = std::env::temp_dir().join(format!(
+            "notepad-rs-native-geometry-{}.json",
+            workspace_io::uid()
+        ));
+        let mut app = NotepadApp::new(&cc, None, path.clone());
+        app.active_tab_mut().doc.text = "Brouillon à conserver".into();
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .inner_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1200.0, 800.0),
+        ));
+        let mut output = ctx.run_ui(input, |_| {
+            let scale = ctx.zoom_factor();
+            let expected = ctx.input(|input| {
+                let rect = input.viewport().inner_rect.unwrap();
+                [rect.width() * scale, rect.height() * scale]
+            });
+            app.save_session(&ctx);
+            let saved = Session::load_from(&path);
+            assert_eq!(saved.window, Some(expected));
+            assert_eq!(saved.tabs[0].text.as_deref(), Some("Brouillon à conserver"));
+        });
+        output.textures_delta.clear();
+        std::fs::remove_file(&path).unwrap();
+        let backup = path.with_extension("json.bak");
+        if backup.exists() {
+            std::fs::remove_file(backup).unwrap();
+        }
+    }
 
     #[test]
     fn two_instances_sync_concurrent_edits_without_losing_either_text() {
