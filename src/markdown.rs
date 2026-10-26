@@ -9,6 +9,83 @@
 
 use eframe::egui;
 
+pub fn to_html(text: &str) -> String {
+    fn escape(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    }
+    fn spans(items: &[Span]) -> String {
+        items
+            .iter()
+            .map(|span| {
+                let mut s = escape(&span.text);
+                for (enabled, tag) in [
+                    (span.style.code, "code"),
+                    (span.style.bold, "strong"),
+                    (span.style.italic, "em"),
+                    (span.style.strike, "del"),
+                ] {
+                    if enabled {
+                        s = format!("<{tag}>{s}</{tag}>");
+                    }
+                }
+                if let Some(url) = &span.url {
+                    if url.starts_with("https://")
+                        || url.starts_with("http://")
+                        || url.starts_with("mailto:")
+                    {
+                        s = format!("<a href=\"{}\">{s}</a>", escape(url));
+                    }
+                }
+                s
+            })
+            .collect()
+    }
+    let mut html = String::from("<!doctype html><html lang=\"fr\"><meta charset=\"utf-8\"><title>Notepad RS</title><style>body{max-width:900px;margin:40px auto;font:16px system-ui;padding:20px}pre,blockquote{background:#eee;padding:16px}td,th{border:1px solid #aaa;padding:8px}table{border-collapse:collapse}</style><body>");
+    for block in parse(text) {
+        html.push_str(&match block {
+            Block::Heading(level, items) => format!("<h{level}>{}</h{level}>", spans(&items)),
+            Block::Paragraph(items) => format!("<p>{}</p>", spans(&items)),
+            Block::Quote(lines) => format!(
+                "<blockquote>{}</blockquote>",
+                lines
+                    .iter()
+                    .map(|line| format!("<p>{}</p>", spans(line)))
+                    .collect::<String>()
+            ),
+            Block::Bullet(_, items) => format!("<ul><li>{}</li></ul>", spans(&items)),
+            Block::Ordered(_, number, items) => {
+                format!("<ol start=\"{number}\"><li>{}</li></ol>", spans(&items))
+            }
+            Block::Code(code) => format!("<pre><code>{}</code></pre>", escape(&code)),
+            Block::Rule => "<hr>".into(),
+            Block::Table { header, rows, .. } => {
+                let mut table = format!(
+                    "<table><thead><tr>{}</tr></thead><tbody>",
+                    header
+                        .iter()
+                        .map(|cell| format!("<th>{}</th>", spans(cell)))
+                        .collect::<String>()
+                );
+                for row in rows {
+                    table.push_str(&format!(
+                        "<tr>{}</tr>",
+                        row.iter()
+                            .map(|cell| format!("<td>{}</td>", spans(cell)))
+                            .collect::<String>()
+                    ));
+                }
+                table.push_str("</tbody></table>");
+                table
+            }
+        });
+    }
+    html.push_str("</body></html>");
+    html
+}
+
 // ---------------------------------------------------------------------------
 // Modele
 // ---------------------------------------------------------------------------
@@ -111,7 +188,8 @@ pub fn parse(text: &str) -> Vec<Block> {
         }
 
         // Tableau : ligne d'en-tete suivie d'une ligne de separateurs.
-        if trimmed.contains('|') && index + 1 < lines.len() && is_table_separator(lines[index + 1]) {
+        if trimmed.contains('|') && index + 1 < lines.len() && is_table_separator(lines[index + 1])
+        {
             let header: Vec<Vec<Span>> = split_row(line)
                 .into_iter()
                 .map(|cell| parse_inline(&cell))
@@ -169,7 +247,9 @@ pub fn parse(text: &str) -> Vec<Block> {
         // Paragraphe : lignes ordinaires jointes jusqu'a la prochaine structure.
         let mut paragraph = String::new();
         let mut hard_break = false;
-        while index < lines.len() && !lines[index].trim().is_empty() && !is_block_start(&lines, index)
+        while index < lines.len()
+            && !lines[index].trim().is_empty()
+            && !is_block_start(&lines, index)
         {
             let current = lines[index];
             if !paragraph.is_empty() {
@@ -281,7 +361,10 @@ fn split_row(line: &str) -> Vec<String> {
     let trimmed = line.trim();
     let trimmed = trimmed.strip_prefix('|').unwrap_or(trimmed);
     let trimmed = trimmed.strip_suffix('|').unwrap_or(trimmed);
-    trimmed.split('|').map(|cell| cell.trim().to_string()).collect()
+    trimmed
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect()
 }
 
 fn is_table_separator(line: &str) -> bool {
@@ -485,7 +568,8 @@ fn bold_close(text: &str, marker: char) -> Option<usize> {
 }
 
 /// Cherche le prochain delimiteur, en ignorant les echappements.
-fn find_delimiter(text: &str, delimiter: &str) -> Option<usize> {    let mut search = 0;
+fn find_delimiter(text: &str, delimiter: &str) -> Option<usize> {
+    let mut search = 0;
     while let Some(found) = text[search..].find(delimiter) {
         let absolute = search + found;
         let escaped = text[..absolute].ends_with('\\');
@@ -506,7 +590,11 @@ fn parse_link(chars: &[char], start: usize) -> Option<(String, String, usize)> {
     let label: String = chars[start + 1..close].iter().collect();
     let target: String = chars[close + 2..end].iter().collect();
     let target = target.trim();
-    let target = target.split_whitespace().next().unwrap_or(target).to_string();
+    let target = target
+        .split_whitespace()
+        .next()
+        .unwrap_or(target)
+        .to_string();
     Some((label, target, end + 1))
 }
 
@@ -649,7 +737,9 @@ pub fn render(ui: &mut egui::Ui, blocks: &[Block], options: &RenderOptions) {
                         ui.end_row();
                         for row in rows {
                             for (column, cell) in row.iter().enumerate() {
-                                table_cell(ui, cell, size, options, text_color, false, align, column);
+                                table_cell(
+                                    ui, cell, size, options, text_color, false, align, column,
+                                );
                             }
                             ui.end_row();
                         }
@@ -760,8 +850,12 @@ mod tests {
         match &blocks[1] {
             Block::Paragraph(spans) => {
                 assert_eq!(text(spans), "Un gras et un italique.");
-                assert!(spans.iter().any(|span| span.style.bold && span.text == "gras"));
-                assert!(spans.iter().any(|span| span.style.italic && span.text == "italique"));
+                assert!(spans
+                    .iter()
+                    .any(|span| span.style.bold && span.text == "gras"));
+                assert!(spans
+                    .iter()
+                    .any(|span| span.style.italic && span.text == "italique"));
             }
             other => panic!("bloc inattendu : {other:?}"),
         }
@@ -792,7 +886,11 @@ mod tests {
     fn parses_tables_with_alignment() {
         let blocks = parse("| Nom | Age |\n|:----|----:|\n| Ada | 36 |\n| Lin | 44 |");
         match &blocks[0] {
-            Block::Table { header, rows, align } => {
+            Block::Table {
+                header,
+                rows,
+                align,
+            } => {
                 assert_eq!(header.len(), 2);
                 assert_eq!(text(&header[0]), "Nom");
                 assert_eq!(rows.len(), 2);
@@ -810,7 +908,9 @@ mod tests {
         assert!(spans
             .iter()
             .any(|span| span.style.link && span.url.as_deref() == Some("https://exemple.fr")));
-        assert!(spans.iter().any(|span| span.style.code && span.text == "code"));
+        assert!(spans
+            .iter()
+            .any(|span| span.style.code && span.text == "code"));
     }
 
     #[test]
@@ -826,7 +926,9 @@ mod tests {
         assert!(spans
             .iter()
             .any(|span| span.style.bold && span.style.italic && span.text == "italique"));
-        assert!(spans.iter().any(|span| span.style.bold && span.text == "gras et "));
+        assert!(spans
+            .iter()
+            .any(|span| span.style.bold && span.text == "gras et "));
     }
 
     #[test]

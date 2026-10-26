@@ -87,6 +87,18 @@ pub struct SessionTab {
     pub parent_id: Option<u64>,
     #[serde(default)]
     pub page_title: String,
+    pub workspace: PageOptions,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PageOptions {
+    pub favorite: bool,
+    pub pinned: bool,
+    pub trashed: bool,
+    pub icon: String,
+    pub color: [u8; 3],
+    pub versions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,7 +116,18 @@ pub struct MoodItem {
 }
 
 impl Default for MoodItem {
-    fn default() -> Self { Self { text: "Note".into(), image_path: None, x: 80.0, y: 80.0, width: 190.0, height: 130.0, color: 0, link: None } }
+    fn default() -> Self {
+        Self {
+            text: "Note".into(),
+            image_path: None,
+            x: 80.0,
+            y: 80.0,
+            width: 190.0,
+            height: 130.0,
+            color: 0,
+            link: None,
+        }
+    }
 }
 
 pub fn encoding_code(encoding: Encoding) -> u8 {
@@ -165,7 +188,9 @@ pub fn window_session_path(process_id: u32) -> PathBuf {
 
 impl Session {
     pub fn load_from(path: &Path) -> Session {
-        let Ok(bytes) = std::fs::read(path) else { return Session::default() };
+        let Ok(bytes) = std::fs::read(path) else {
+            return Session::default();
+        };
         serde_json::from_slice(&bytes).unwrap_or_default()
     }
 
@@ -177,10 +202,12 @@ impl Session {
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
         let temp = path.with_extension("json.tmp");
         std::fs::write(&temp, json)?;
+        if path.exists() {
+            std::fs::copy(path, path.with_extension("json.bak"))?;
+        }
         // `rename` remplace le fichier existant sous Windows depuis Rust 1.26.
         std::fs::rename(&temp, &path)
     }
-
 }
 
 /// Place `path` en tete des recents (dedoublonnage insensible a la casse,
@@ -223,10 +250,15 @@ mod tests {
             page_id: 1,
             parent_id: None,
             page_title: String::new(),
+            workspace: Default::default(),
         });
         session.tabs.push(SessionTab {
             path: None,
             text: Some("brouillon".into()),
+            page_id: 2,
+            parent_id: None,
+            page_title: String::new(),
+            workspace: Default::default(),
             encoding: encoding_code(Encoding::Utf8Bom),
             eol: eol_code(Eol::Cr),
             wrap: false,
