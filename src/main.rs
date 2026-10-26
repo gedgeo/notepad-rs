@@ -2457,7 +2457,15 @@ impl eframe::App for NotepadApp {
                 ui.horizontal(|ui| {
                     ui.label(format!("Ln {line}, Col {column}"));
                     ui.separator();
-                    ui.label(format!("{} caractère(s)", tab.doc.text.chars().count()));
+                    let total_chars = tab.doc.text.chars().count();
+                    if tab.doc.selection_chars > 0 {
+                        ui.label(format!(
+                            "{} sur {} caractère(s)",
+                            tab.doc.selection_chars, total_chars
+                        ));
+                    } else {
+                        ui.label(format!("{} caractère(s)", total_chars));
+                    }
                     ui.separator();
                     ui.label(if tab.doc.markdown {
                         "Markdown"
