@@ -85,6 +85,8 @@ pub struct SessionTab {
     pub page_id: u64,
     #[serde(default)]
     pub parent_id: Option<u64>,
+    #[serde(default)]
+    pub page_title: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
