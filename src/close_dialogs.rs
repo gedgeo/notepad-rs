@@ -151,7 +151,16 @@ impl NotepadApp {
                 .or_else(|| response.should_close().then_some(false));
             if let Some(save) = choice {
                 self.pending_ansi_save = None;
+                let target = self.pending_ansi_tab.take();
                 if save {
+                    let Some(index) =
+                        target.and_then(|id| self.tabs.iter().position(|t| t.doc.id == id))
+                    else {
+                        self.quit_save_pending = false;
+                        self.status = "Enregistrement ANSI annulé : document fermé".into();
+                        return;
+                    };
+                    self.active = index;
                     self.write_active_to(path);
                     if self.active_tab().doc.dirty {
                         self.quit_save_pending = false;
@@ -434,6 +443,35 @@ mod tests {
         assert_eq!(
             restored.active_tab().workspace.canvas_size,
             Some([1920, 1080])
+        );
+        cleanup(dir);
+    }
+    #[test]
+    fn ansi_confirmation_stays_bound_to_its_document() {
+        let (mut app, ctx, dir) = fixture();
+        let id = app.active_tab().doc.id;
+        app.active_tab_mut().doc.text = "Γ".into();
+        app.active_tab_mut().doc.encoding = Encoding::Ansi;
+        app.save_active(false);
+        assert!(app.pending_ansi_save.is_some());
+        app.new_tab();
+        app.active_tab_mut().doc.text = "Autre document".into();
+        app.active_tab_mut().doc.dirty = true;
+        let other = app.active_tab().doc.id;
+        click(&mut app, &ctx, "Enregistrer quand même");
+        assert_eq!(app.active_tab().doc.id, id);
+        assert!(!app.active_tab().doc.dirty);
+        assert_eq!(
+            std::fs::read(dir.join("note.txt")).unwrap(),
+            Encoding::Ansi.encode("Γ")
+        );
+        assert!(
+            app.tabs
+                .iter()
+                .find(|t| t.doc.id == other)
+                .unwrap()
+                .doc
+                .dirty
         );
         cleanup(dir);
     }

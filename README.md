@@ -191,7 +191,7 @@ Prérequis (machine actuelle) :
 # Depuis C:\Users\Gedge\Projects\notepad-rs
 .\build.ps1              # cargo build
 .\build.ps1 build -Release
-.\build.ps1 test         # 59 tests unitaires
+.\build.ps1 test         # 111 tests
 .\build.ps1 run
 ```
 
@@ -250,33 +250,27 @@ cargo build --release
   principale ; elle n'est volontairement pas restaurée au prochain démarrage.
 - **Texte autosauvegardé en clair** dans `session.json` (comme l'autosauvegarde
   du Bloc-notes) : effacer ce fichier remet l'application à zéro.
-- **Page de code** : ANSI = Windows-1252 uniquement, la page système réelle n'est
-  pas interrogée (`GetACP`), donc une machine en CP1251 lirait mal certains
-  fichiers.
+- **Page de code** : ANSI utilise la page système Windows (`GetACP`), y compris les pages multioctets et UTF-8.
 - **Conversion ANSI avec perte** : avant l'enregistrement, l'application détecte
-  les caractères absents de Windows-1252 et demande une confirmation explicite.
+  les caractères absents de la page ANSI système et demande une confirmation explicite.
 - **Impression** : pagination approximative entre l'aperçu (dimensions de
   « Mise en page ») et l'imprimante (dimensions du pilote), un saut de page peut
   donc différer légèrement ; le texte est imprimé en police simple (le gras et
-  l'italique Markdown ne sont pas rendus à l'impression) ; pas d'en-tête
-  personnalisé ni de nombre de copies multiple.
+  l'italique Markdown ne sont pas rendus à l'impression). Les en-têtes et pieds de page personnalisés, la sélection, la plage de pages et le nombre de copies sont pris en charge.
 - **Outils d'écriture IA et « Rechercher avec Bing »** volontairement hors
   périmètre.
-- **Police** : liste fixe de familles courantes lues dans `C:\Windows\Fonts` ;
-  pas d'énumération complète du catalogue système ni de styles (gras/italique)
-  dans la boîte Police.
+- **Police** : catalogue des fichiers TTF/OTF et collections TTC/OTC dans les dossiers de polices Windows et utilisateur, variantes de style incluses. Les fontes uniquement enregistrées dans un emplacement personnalisé ne sont pas encore découvertes.
 - **Fenêtres** : une fenêtre = un processus (pas d'onglets détachables ni de
   restauration de session multi-fenêtres). `Quitter` ferme les autres instances
   du même exécutable.
-- **Position de fenêtre** non restaurée (taille seulement).
+- **Fenêtre** : position, taille normale et état maximisé restaurés.
 - **Fichiers volumineux** : le texte est chargé entièrement en mémoire et rendu
   par `egui`, sans le découpage incrémental de Notepad. Au-delà de quelques
   dizaines de Mo, l'ouverture et la saisie ralentissent.
 - **Pas de coloration syntaxique ni de numérotation de lignes** — fidèle au
   Bloc-notes, mais aussi absence de modes additionnels.
 - **Zoom** appliqué par document et non global à l'application.
-- **Ensemble de tests** limité à la logique pure : aucune automatisation de
-  l'interface.
+- **Tests** : logique et événements egui automatisés ; dialogues système et lecteur d’écran à vérifier manuellement.
 
 ## 7. Journal des lots
 
@@ -298,3 +292,15 @@ fonctions cités proviennent de l'analyse du binaire public de Windows et
 servent uniquement de documentation comportementale.
 
 La chaîne Rust du projet est définie dans `rust-toolchain.toml` : `stable-x86_64-pc-windows-gnu`. Cette configuration est conservée après un déplacement du dossier et évite de reprendre la chaîne MSVC par défaut (qui exige `link.exe`). Si nécessaire, installez-la avec `rustup toolchain install stable-x86_64-pc-windows-gnu`. Utilisez ensuite `build.ps1` pour sélectionner également WinLibs.
+
+
+## Améliorations Bloc-notes — 26 octobre 2026
+
+- ANSI : page de code Windows réelle, conversion sans approximation « best fit », confirmation explicite avant toute perte.
+- Fenêtre : position, taille normale et état maximisé conservés.
+- Paramètres > Préférences du Bloc-notes : ouvrir les fichiers dans un onglet ou une nouvelle fenêtre, désactiver ou vider les fichiers récents.
+- Police : familles et variantes installées, collections de polices incluses ; tailles exprimées en pixels logiques.
+- Barre d’état : ligne, colonne, total et « X sur Y caractère(s) » directement visibles.
+- Recherche/remplacement : bornes Unicode corrigées pour les correspondances de casse de longueurs UTF-8 différentes.
+
+Restent hors de ce lot : correction orthographique/automatique, routage d’une association de fichiers vers un processus déjà ouvert, onglets détachables, rendu incrémental des très gros fichiers et pagination strictement identique au pilote d’impression.

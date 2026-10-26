@@ -440,6 +440,17 @@ impl NotepadApp {
                     ui.label(
                         egui::RichText::new(format!("{}  {label}", icons::CHECK_CIRCLE)).size(13.0),
                     );
+                    if !self.active_tab().doc.moodboard {
+                        let doc = &self.active_tab().doc;
+                        let total = doc.text.chars().count();
+                        let (line, col) = line_col(&doc.text, doc.cursor_char);
+                        ui.label(format!("Ln {line}, Col {col}"));
+                        ui.label(if doc.selection_chars > 0 {
+                            format!("{} sur {total} caractère(s)", doc.selection_chars)
+                        } else {
+                            format!("{total} caractère(s)")
+                        });
+                    }
                     if !self.status.is_empty() {
                         ui.add(
                             egui::Label::new(egui::RichText::new(&self.status).size(13.0))

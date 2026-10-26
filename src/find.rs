@@ -48,15 +48,18 @@ fn chars_eq(a: char, b: char, match_case: bool) -> bool {
     }
 }
 
-fn matches_at(hay: &str, start: usize, needle: &str, match_case: bool) -> bool {
+fn match_end(hay: &str, start: usize, needle: &str, match_case: bool) -> Option<usize> {
+    let mut end = start;
     let mut hay_chars = hay[start..].chars();
     for needle_char in needle.chars() {
         match hay_chars.next() {
-            Some(hay_char) if chars_eq(hay_char, needle_char, match_case) => {}
-            _ => return false,
+            Some(hay_char) if chars_eq(hay_char, needle_char, match_case) => {
+                end += hay_char.len_utf8();
+            }
+            _ => return None,
         }
     }
-    true
+    Some(end)
 }
 
 /// Cherche `needle` a partir de l'octet `from`, sans bouclage.
@@ -71,25 +74,28 @@ pub fn find_from(hay: &str, needle: &str, from: usize, match_case: bool) -> Opti
     }
     for (offset, _) in hay[start..].char_indices() {
         let candidate = start + offset;
-        if matches_at(hay, candidate, needle, match_case) {
+        if let Some(end) = match_end(hay, candidate, needle, match_case) {
             return Some(Match {
                 start: candidate,
-                end: candidate + needle.len(),
+                end,
             });
         }
     }
     // Derniere position possible : la fin de chaine.
-    if matches_at(hay, start, needle, match_case) {
-        return Some(Match {
-            start,
-            end: start + needle.len(),
-        });
+    if let Some(end) = match_end(hay, start, needle, match_case) {
+        return Some(Match { start, end });
     }
     None
 }
 
 /// Recherche vers l'avant avec bouclage optionnel (case « Boucler »).
-pub fn find_next(hay: &str, needle: &str, from: usize, match_case: bool, wrap: bool) -> Option<Match> {
+pub fn find_next(
+    hay: &str,
+    needle: &str,
+    from: usize,
+    match_case: bool,
+    wrap: bool,
+) -> Option<Match> {
     find_from(hay, needle, from, match_case).or_else(|| {
         if wrap && from > 0 {
             find_from(hay, needle, 0, match_case)
@@ -113,8 +119,7 @@ pub fn find_previous(
         if offset >= limit {
             break;
         }
-        if matches_at(hay, offset, needle, match_case) {
-            let end = offset + needle.len();
+        if let Some(end) = match_end(hay, offset, needle, match_case) {
             if end <= limit {
                 last = Some(Match { start: offset, end });
             }
@@ -126,11 +131,8 @@ pub fn find_previous(
     // Bouclage : dernier resultat du document.
     let mut wrapped: Option<Match> = None;
     for (offset, _) in hay.char_indices() {
-        if matches_at(hay, offset, needle, match_case) {
-            wrapped = Some(Match {
-                start: offset,
-                end: offset + needle.len(),
-            });
+        if let Some(end) = match_end(hay, offset, needle, match_case) {
+            wrapped = Some(Match { start: offset, end });
         }
     }
     wrapped
@@ -138,7 +140,12 @@ pub fn find_previous(
 
 /// Remplace toutes les occurrences et renvoie le texte obtenu + le nombre de
 /// remplacements effectues.
-pub fn replace_all(hay: &str, needle: &str, replacement: &str, match_case: bool) -> (String, usize) {
+pub fn replace_all(
+    hay: &str,
+    needle: &str,
+    replacement: &str,
+    match_case: bool,
+) -> (String, usize) {
     if needle.is_empty() {
         return (hay.to_owned(), 0);
     }
@@ -161,6 +168,28 @@ pub fn replace_all(hay: &str, needle: &str, replacement: &str, match_case: bool)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unicode_case_matches_keep_real_byte_boundaries() {
+        let text = "K k K";
+        assert_eq!(
+            find_from(text, "k", 0, false),
+            Some(Match { start: 0, end: 3 })
+        );
+        assert_eq!(
+            find_from("k", "K", 0, false),
+            Some(Match { start: 0, end: 1 })
+        );
+        assert_eq!(replace_all(text, "k", "X", false), ("X X X".into(), 3));
+        assert_eq!(
+            find_previous(text, "k", 3, false, false),
+            Some(Match { start: 0, end: 3 })
+        );
+        assert_eq!(
+            find_previous("k", "K", 0, false, true),
+            Some(Match { start: 0, end: 1 })
+        );
+    }
 
     #[test]
     fn finds_case_sensitively() {

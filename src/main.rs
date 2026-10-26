@@ -17,6 +17,8 @@ mod find;
 mod format;
 mod header;
 mod markdown;
+#[cfg(test)]
+mod notepad_checks;
 mod page;
 mod pdf_export;
 mod print;
@@ -79,15 +81,33 @@ fn main() -> eframe::Result<()> {
             .unwrap_or([1200.0, 800.0])
     };
 
+    let mut viewport = egui::ViewportBuilder::default().with_maximized(saved.maximized);
+    if design_preview.is_none() {
+        if let Some([x, y]) = saved
+            .window_position
+            .filter(|v| v.iter().all(|f| f.is_finite()))
+        {
+            viewport = viewport.with_position([x, y]);
+        }
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
+        viewport: viewport
             .with_inner_size(size)
             .with_min_inner_size([460.0, 300.0])
             .with_title("Notepad RS")
             .with_drag_and_drop(true),
         ..Default::default()
     };
-    let session = if restore { Some(saved) } else { None };
+    let session = if restore {
+        Some(saved)
+    } else if design_preview.is_none() {
+        let mut preferences = Session::load_from(&session::session_path());
+        preferences.tabs.clear();
+        preferences.active = 0;
+        Some(preferences)
+    } else {
+        None
+    };
     eframe::run_native(
         "Notepad RS",
         options,
@@ -429,36 +449,57 @@ fn bold_font_file(name: &str) -> Option<&'static str> {
     }
 }
 
-/// Polices systeme proposées par la boîte « Police » (fichier dans
-/// `C:\Windows\Fonts`, chargé à la demande).
-const SYSTEM_FONTS: &[(&str, &str)] = &[
-    ("Segoe UI", "segoeui.ttf"),
-    ("Segoe UI Variable", "SegUIVar.ttf"),
-    ("Arial", "arial.ttf"),
-    ("Calibri", "calibri.ttf"),
-    ("Consolas", "consola.ttf"),
-    ("Courier New", "cour.ttf"),
-    ("Georgia", "georgia.ttf"),
-    ("Lucida Console", "lucon.ttf"),
-    ("Tahoma", "tahoma.ttf"),
-    ("Times New Roman", "times.ttf"),
-    ("Verdana", "verdana.ttf"),
-];
-
 fn windows_fonts_dir() -> PathBuf {
     PathBuf::from(std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into())).join("Fonts")
 }
 
-/// Polices reellement presentes sur la machine.
-fn available_system_fonts() -> Vec<(&'static str, PathBuf)> {
-    let dir = windows_fonts_dir();
-    SYSTEM_FONTS
-        .iter()
-        .filter_map(|(name, file)| {
-            let path = dir.join(file);
-            path.exists().then_some((*name, path))
-        })
-        .collect()
+/// Cached installed font faces, including style variants and collection indices.
+fn available_system_fonts() -> &'static [(String, PathBuf, u32)] {
+    static FONTS: std::sync::OnceLock<Vec<(String, PathBuf, u32)>> = std::sync::OnceLock::new();
+    FONTS.get_or_init(|| {
+        let mut dirs = vec![windows_fonts_dir()];
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            dirs.push(PathBuf::from(local).join("Microsoft/Windows/Fonts"));
+        }
+        let mut fonts = Vec::new();
+        for dir in dirs {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                if !["ttf", "otf", "ttc", "otc"].contains(&ext.as_str()) {
+                    continue;
+                }
+                let Ok(data) = std::fs::read(&path) else {
+                    continue;
+                };
+                for index in 0..ttf_parser::fonts_in_collection(&data).unwrap_or(1) {
+                    let Ok(face) = ttf_parser::Face::parse(&data, index) else {
+                        continue;
+                    };
+                    let name = face.names().into_iter().find_map(|n| {
+                        if n.name_id == ttf_parser::name_id::FULL_NAME {
+                            n.to_string()
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(name) = name {
+                        fonts.push((name, path.clone(), index));
+                    }
+                }
+            }
+        }
+        fonts.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        fonts.dedup_by(|a, b| a.0 == b.0);
+        fonts
+    })
 }
 
 struct NotepadApp {
@@ -488,12 +529,15 @@ struct NotepadApp {
     pending_close: Vec<u64>,
     /// Confirmation avant une conversion ANSI avec perte.
     pending_ansi_save: Option<PathBuf>,
+    pending_ansi_tab: Option<u64>,
     session_file: PathBuf,
     /// Placer le curseur dans l'editeur au prochain affichage (restauration de
     /// session, changement d'onglet).
     pending_focus: bool,
     /// Liste des fichiers recents (chemins complets, plus recent en tete).
     recent: Vec<String>,
+    preferences: session::NotepadPreferences,
+    normal_window: Option<[f32; 4]>,
     /// Onglet en cours de deplacement par glisser (index d'origine).
     dragging_tab: Option<usize>,
     /// Retour a la ligne applique aux nouveaux onglets (preference de session).
@@ -623,6 +667,15 @@ impl NotepadApp {
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().id_salt("workspace-tools-scroll").show(ui, |ui| {
                 ui.horizontal(|ui|{ui.heading("Espace de travail");if ui.small_button("Fermer").clicked(){self.design.settings=false;}});
+                ui.collapsing("Préférences du Bloc-notes", |ui| {
+                    if ui.checkbox(&mut self.preferences.recent_enabled, "Conserver les fichiers récents").changed() {
+                        if !self.preferences.recent_enabled { self.recent.clear(); }
+                        self.session_dirty = true;
+                    }
+                    if ui.checkbox(&mut self.preferences.open_new_window, "Ouvrir les fichiers dans une nouvelle fenêtre").changed() { self.session_dirty = true; }
+                    ui.label("Sinon, ouvrir dans un onglet de cette fenêtre.");
+                    if ui.button("Effacer les fichiers récents").clicked() { self.recent.clear(); self.session_dirty = true; }
+                });
                 let tab = &mut self.tabs[active];
                 changed |= ui.checkbox(&mut tab.workspace.favorite, "Favori").changed();
                 changed |= ui.checkbox(&mut tab.workspace.pinned, "Épinglée").changed();
@@ -968,9 +1021,12 @@ impl NotepadApp {
             quit_all_windows: false,
             pending_close: Vec::new(),
             pending_ansi_save: None,
+            pending_ansi_tab: None,
             session_file,
             pending_focus: false,
             recent: Vec::new(),
+            preferences: session::NotepadPreferences::default(),
+            normal_window: None,
             dragging_tab: None,
             default_wrap: true,
             default_font_size: 15.0,
@@ -1021,7 +1077,16 @@ impl NotepadApp {
                 15.0
             };
             app.font_family = session.font;
-            app.recent = session.recent;
+            if let Some([w, h]) = session.window {
+                let [x, y] = session.window_position.unwrap_or([40.0, 40.0]);
+                app.normal_window = Some([x, y, w, h]);
+            }
+            app.preferences = session.preferences;
+            app.recent = if app.preferences.recent_enabled {
+                session.recent
+            } else {
+                Vec::new()
+            };
             app.page = session.page.sanitized();
             let mut used_ids = std::collections::HashSet::new();
             let mut fresh_id = session
@@ -1235,7 +1300,27 @@ impl NotepadApp {
     }
 
     /// Ajoute un chemin aux recents et demande la reecriture de la session.
+    fn open_requested(&mut self, path: PathBuf) {
+        if self.preferences.open_new_window {
+            let result = std::env::current_exe().and_then(|exe| {
+                std::process::Command::new(exe)
+                    .arg("--new-window")
+                    .arg(&path)
+                    .spawn()
+            });
+            match result {
+                Ok(_) => self.remember_recent(&path),
+                Err(e) => self.status = format!("Ouverture impossible : {e}"),
+            }
+        } else {
+            self.open_path(path);
+        }
+    }
+
     fn remember_recent(&mut self, path: &std::path::Path) {
+        if !self.preferences.recent_enabled {
+            return;
+        }
         session::touch_recent_list(&mut self.recent, path);
         self.session_dirty = true;
     }
@@ -1261,6 +1346,8 @@ impl NotepadApp {
         };
         let Some(path) = target else { return };
         if !tab.doc.moodboard && tab.doc.encoding.loses_information(&tab.doc.text) {
+            let id = tab.doc.id;
+            self.pending_ansi_tab = Some(id);
             self.pending_ansi_save = Some(path);
             return;
         }
@@ -1428,9 +1515,9 @@ impl NotepadApp {
         if self.loaded_fonts.contains(name) {
             return;
         }
-        let Some((_, path)) = available_system_fonts()
+        let Some((_, path, face_index)) = available_system_fonts()
             .into_iter()
-            .find(|(font_name, _)| *font_name == name)
+            .find(|(font_name, _, _)| font_name == name)
         else {
             return;
         };
@@ -1438,9 +1525,11 @@ impl NotepadApp {
             return;
         };
         let family = egui::FontFamily::Name(name.into());
+        let mut data = egui::FontData::from_owned(bytes);
+        data.index = *face_index;
         ctx.add_font(egui::FontInsert::new(
             name,
-            egui::FontData::from_owned(bytes),
+            data,
             vec![egui::InsertFontFamily {
                 family,
                 priority: egui::FontPriority::Highest,
@@ -1539,7 +1628,22 @@ impl NotepadApp {
             font_size: self.default_font_size,
             wrap: self.default_wrap,
             status_bar: self.status_bar,
-            window,
+            window: if ctx.input(|i| i.viewport().maximized.unwrap_or(false)) {
+                self.normal_window.map(|r| [r[2], r[3]]).or(window)
+            } else {
+                window
+            },
+            window_position: if ctx.input(|i| i.viewport().maximized.unwrap_or(false)) {
+                self.normal_window.map(|r| [r[0], r[1]])
+            } else {
+                ctx.input(|i| {
+                    i.viewport()
+                        .outer_rect
+                        .map(|r| [r.min.x * interface_scale, r.min.y * interface_scale])
+                })
+            },
+            maximized: ctx.input(|i| i.viewport().maximized.unwrap_or(false)),
+            preferences: self.preferences.clone(),
             recent: self.recent.clone(),
             page: self.page.clone(),
             sync_directory: self.sync_directory.clone(),
@@ -2387,7 +2491,7 @@ impl NotepadApp {
                         .pick_file()
                 });
                 if let Some(path) = path {
-                    self.open_path(path);
+                    self.open_requested(path);
                 }
             }
             Action::Save => self.save_active(false),
@@ -2479,7 +2583,7 @@ impl NotepadApp {
             Action::ToggleStatus => self.status_bar = !self.status_bar,
             Action::OpenRecent(path) => {
                 if path.exists() {
-                    self.open_path(path);
+                    self.open_requested(path);
                 } else {
                     self.recent
                         .retain(|entry| !entry.eq_ignore_ascii_case(&path.to_string_lossy()));
@@ -3053,6 +3157,27 @@ impl eframe::App for NotepadApp {
             self.ensure_font(&ctx, &name);
         }
 
+        let scale = ctx.zoom_factor();
+        let bounds = ctx.input(|i| {
+            let v = i.viewport();
+            if v.maximized.unwrap_or(false) || v.minimized.unwrap_or(false) {
+                return None;
+            }
+            let inner = v.inner_rect?;
+            let outer = v.outer_rect?;
+            Some([
+                outer.min.x * scale,
+                outer.min.y * scale,
+                inner.width() * scale,
+                inner.height() * scale,
+            ])
+        });
+        if let Some(bounds) = bounds {
+            if self.normal_window != Some(bounds) {
+                self.normal_window = Some(bounds);
+                self.session_dirty = true;
+            }
+        }
         // Fichiers deposes sur la fenetre.
         let dropped: Vec<PathBuf> = ctx.input(|input| {
             input
@@ -3260,7 +3385,7 @@ impl eframe::App for NotepadApp {
                     .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                     .show(&ctx, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label("Police :");
+                            ui.label("Police et style :");
                             egui::ComboBox::from_id_salt("font-family")
                                 .selected_text(draft.0.clone())
                                 .show_ui(ui, |ui| {
@@ -3269,8 +3394,12 @@ impl eframe::App for NotepadApp {
                                         DEFAULT_FONT_LABEL.to_string(),
                                         DEFAULT_FONT_LABEL,
                                     );
-                                    for (name, _) in available_system_fonts() {
-                                        ui.selectable_value(&mut draft.0, name.to_string(), name);
+                                    for (name, _, _) in available_system_fonts() {
+                                        ui.selectable_value(
+                                            &mut draft.0,
+                                            name.to_string(),
+                                            name.as_str(),
+                                        );
                                     }
                                 });
                         });
@@ -3279,7 +3408,7 @@ impl eframe::App for NotepadApp {
                             ui.add(
                                 egui::DragValue::new(&mut draft.1)
                                     .range(8.0..=60.0)
-                                    .suffix(" pt"),
+                                    .suffix(" px"),
                             );
                         });
                         ui.separator();
@@ -3305,7 +3434,7 @@ impl eframe::App for NotepadApp {
                 if let Some(name) = self.font_family.clone() {
                     self.ensure_font(&ctx, &name);
                 }
-                self.status = format!("Police : {chosen}, {size} pt");
+                self.status = format!("Police : {chosen}, {size} px");
                 open = false;
             }
             if cancel {

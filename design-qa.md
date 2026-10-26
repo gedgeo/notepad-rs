@@ -92,3 +92,7 @@ Ces vues globales et rapprochées ont été ouvertes pour vérifier le rendu, no
 - Échelle initiale ramenée à 100 %, composants plus compacts et titres de dialogue à 20 px. Migration unique des anciennes sessions au réglage initial de 125 %.
 - Validation : compilation réussie et 103 tests réussis, dont 8 régressions sur les boutons, les erreurs, ANSI et la sauvegarde du moodboard.
 - Capture native vérifiée : `samples/previews/close-dialog-fixed.png`. Les boîtes de choix de fichier Windows restent à vérifier manuellement.
+
+## Fonctions Bloc-notes — 26 octobre 2026
+
+Validation : 111 tests réussis et compilation Release réussie. Capture native `samples/previews/notepad-status-updated.png` vérifiée : ligne, colonne et total directement visibles. Tests ajoutés pour bornes Unicode, pages ANSI Windows 1251/1252/932/65001, association confirmation ANSI-document, préférences/récents, compatibilité des anciennes sessions, géométrie maximisée, catalogue des faces de police et compteur de sélection rendu. Les dialogues Windows, le déplacement entre moniteurs et l’impression physique nécessitent encore un essai manuel.

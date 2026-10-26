@@ -1,3 +1,9 @@
+## Complément Bloc-notes — 26 octobre 2026
+
+ANSI système, catalogue des polices installées avec variantes et collections, réglages d’ouverture onglet/nouvelle fenêtre, désactivation des récents, compteur de sélection visible et restauration de la géométrie normale/maximisée. Correction du remplacement Unicode pour les correspondances de casse à longueur UTF-8 différente. Préférences accessibles dans Paramètres > Préférences du Bloc-notes.
+
+Validation : 111 tests, dont tests de pages ANSI 1251/1252/932/65001, compatibilité des anciennes sessions, confidentialité des récents, variantes de polices et géométrie maximisée. Correction orthographique, routage interprocessus vers une instance existante et gros fichiers restent des chantiers distincts.
+
 # Fonctions de pages — 26 octobre 2026
 
 ## Correctif de démarrage après refonte

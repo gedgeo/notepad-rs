@@ -5,6 +5,7 @@
 //! validite UTF-8 (equivalent pratique du test `IsTextUnicode` importe par
 //! `notepad.exe`).
 
+#[cfg(not(windows))]
 use encoding_rs::WINDOWS_1252;
 
 /// Codages proposes par Notepad.
@@ -64,10 +65,7 @@ impl Encoding {
             Encoding::Utf8Bom => String::from_utf8_lossy(strip_utf8_bom(bytes)).into_owned(),
             Encoding::Utf16Le => decode_utf16(strip_utf16_bom(bytes, &BOM_UTF16_LE), true),
             Encoding::Utf16Be => decode_utf16(strip_utf16_bom(bytes, &BOM_UTF16_BE), false),
-            Encoding::Ansi => {
-                let (text, _, _) = WINDOWS_1252.decode(bytes);
-                text.into_owned()
-            }
+            Encoding::Ansi => ansi_decode(bytes),
         }
     }
 
@@ -83,19 +81,100 @@ impl Encoding {
             }
             Encoding::Utf16Le => encode_utf16(text, true),
             Encoding::Utf16Be => encode_utf16(text, false),
-            Encoding::Ansi => {
-                let (bytes, _, _) = WINDOWS_1252.encode(text);
-                bytes.into_owned()
-            }
+            Encoding::Ansi => ansi_encode(text).0,
         }
     }
 
     /// Retourne vrai quand l'encodage ANSI remplace au moins un caractère.
     pub fn loses_information(self, text: &str) -> bool {
         match self {
-            Encoding::Ansi => WINDOWS_1252.encode(text).2,
+            Encoding::Ansi => ansi_encode(text).1,
             _ => false,
         }
+    }
+}
+
+#[cfg(not(windows))]
+fn ansi_decode(bytes: &[u8]) -> String {
+    WINDOWS_1252.decode(bytes).0.into_owned()
+}
+#[cfg(not(windows))]
+fn ansi_encode(text: &str) -> (Vec<u8>, bool) {
+    let (bytes, _, loss) = WINDOWS_1252.encode(text);
+    (bytes.into_owned(), loss)
+}
+#[cfg(windows)]
+fn ansi_decode(bytes: &[u8]) -> String {
+    ansi_decode_page(
+        unsafe { windows_sys::Win32::Globalization::GetACP() },
+        bytes,
+    )
+}
+#[cfg(windows)]
+fn ansi_decode_page(cp: u32, bytes: &[u8]) -> String {
+    use windows_sys::Win32::Globalization::MultiByteToWideChar;
+    if bytes.is_empty() {
+        return String::new();
+    }
+    let len = i32::try_from(bytes.len()).expect("Fichier ANSI trop volumineux");
+    unsafe {
+        let count = MultiByteToWideChar(cp, 0, bytes.as_ptr(), len, std::ptr::null_mut(), 0);
+        assert!(count > 0, "Conversion ANSI système impossible");
+        let mut wide = vec![0u16; count as usize];
+        assert_eq!(
+            MultiByteToWideChar(cp, 0, bytes.as_ptr(), len, wide.as_mut_ptr(), count),
+            count
+        );
+        String::from_utf16_lossy(&wide)
+    }
+}
+#[cfg(windows)]
+fn ansi_encode(text: &str) -> (Vec<u8>, bool) {
+    ansi_encode_page(unsafe { windows_sys::Win32::Globalization::GetACP() }, text)
+}
+#[cfg(windows)]
+fn ansi_encode_page(cp: u32, text: &str) -> (Vec<u8>, bool) {
+    use windows_sys::Win32::Globalization::WideCharToMultiByte;
+    if text.is_empty() {
+        return (Vec::new(), false);
+    }
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    let len = i32::try_from(wide.len()).expect("Texte ANSI trop volumineux");
+    unsafe {
+        let flags = if cp == 65001 { 0 } else { 0x400 };
+        let mut substituted = 0;
+        let used = if cp == 65001 {
+            std::ptr::null_mut()
+        } else {
+            &mut substituted
+        };
+        let count = WideCharToMultiByte(
+            cp,
+            flags,
+            wide.as_ptr(),
+            len,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null(),
+            used,
+        );
+        assert!(count > 0, "Conversion ANSI système impossible");
+        let mut bytes = vec![0u8; count as usize];
+        assert_eq!(
+            WideCharToMultiByte(
+                cp,
+                flags,
+                wide.as_ptr(),
+                len,
+                bytes.as_mut_ptr(),
+                count,
+                std::ptr::null(),
+                used
+            ),
+            count
+        );
+        let loss = substituted != 0 || ansi_decode_page(cp, &bytes) != text;
+        (bytes, loss)
     }
 }
 
@@ -142,9 +221,31 @@ fn encode_utf16(text: &str, little_endian: bool) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn system_code_pages_roundtrip_without_best_fit_substitution() {
+        for (cp, text) in [
+            (1252, "café"),
+            (1251, "Привет"),
+            (932, "東京"),
+            (65001, "café 東京 😀"),
+        ] {
+            let (bytes, loss) = ansi_encode_page(cp, text);
+            assert!(!loss, "page {cp}");
+            assert_eq!(ansi_decode_page(cp, &bytes), text);
+        }
+        let (bytes, loss) = ansi_encode_page(1252, "東京");
+        assert!(loss);
+        assert_eq!(bytes, b"??");
+        assert!(ansi_encode_page(1252, "Γ").1);
+    }
+
     #[test]
     fn detects_boms() {
-        assert_eq!(Encoding::detect(&[0xEF, 0xBB, 0xBF, b'a']), Encoding::Utf8Bom);
+        assert_eq!(
+            Encoding::detect(&[0xEF, 0xBB, 0xBF, b'a']),
+            Encoding::Utf8Bom
+        );
         assert_eq!(Encoding::detect(&[0xFF, 0xFE, b'a', 0]), Encoding::Utf16Le);
         assert_eq!(Encoding::detect(&[0xFE, 0xFF, 0, b'a']), Encoding::Utf16Be);
     }
@@ -171,14 +272,17 @@ mod tests {
     #[test]
     fn ansi_roundtrip_keeps_accents() {
         let bytes = Encoding::Ansi.encode("caf\u{e9} cr\u{e8}me");
-        assert_eq!(bytes, vec![b'c', b'a', b'f', 0xE9, b' ', b'c', b'r', 0xE8, b'm', b'e']);
         assert_eq!(Encoding::Ansi.decode(&bytes), "caf\u{e9} cr\u{e8}me");
     }
 
     #[test]
     fn detects_ansi_loss() {
-        assert!(!Encoding::Ansi.loses_information("café"));
-        assert!(Encoding::Ansi.loses_information("東京"));
+        for text in ["café", "東京", "Привет", "😀"] {
+            assert_eq!(
+                Encoding::Ansi.loses_information(text),
+                Encoding::Ansi.decode(&Encoding::Ansi.encode(text)) != text
+            );
+        }
     }
 
     #[test]

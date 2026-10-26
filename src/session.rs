@@ -37,6 +37,9 @@ pub struct Session {
     pub status_bar: bool,
     /// Taille interieure de la fenetre en points logiques.
     pub window: Option<[f32; 2]>,
+    pub window_position: Option<[f32; 2]>,
+    pub maximized: bool,
+    pub preferences: NotepadPreferences,
     /// Chemins complets, le plus recent en premier.
     pub recent: Vec<String>,
     /// Mise en page (papier, orientation, marges).
@@ -60,6 +63,9 @@ impl Default for Session {
             wrap: true,
             status_bar: true,
             window: None,
+            window_position: None,
+            maximized: false,
+            preferences: NotepadPreferences::default(),
             recent: Vec::new(),
             page: PageSetup::default(),
             sync_directory: None,
@@ -351,5 +357,20 @@ mod tests {
             assert!(data_dir().starts_with(PathBuf::from(appdata)));
         }
         assert!(session_path().ends_with("session.json"));
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotepadPreferences {
+    pub recent_enabled: bool,
+    pub open_new_window: bool,
+}
+impl Default for NotepadPreferences {
+    fn default() -> Self {
+        Self {
+            recent_enabled: true,
+            open_new_window: false,
+        }
     }
 }

@@ -9,6 +9,7 @@ license = "MIT"
 eframe = "0.37"
 egui-phosphor = "0.14"
 encoding_rs = "0.8"
+ttf-parser = "0.25"
 rfd = "0.17"
 chrono = "0.4"
 serde = { version = "1", features = ["derive"] }
@@ -19,6 +20,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Graphics_Gdi",
     "Win32_Storage_Xps",
     "Win32_System_Threading",
