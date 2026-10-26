@@ -9,6 +9,7 @@
 // L'attribut est desactive pour les tests afin de garder leur sortie standard.
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
+mod blocks;
 mod doc;
 mod encoding;
 mod find;
@@ -16,8 +17,10 @@ mod format;
 mod header;
 mod markdown;
 mod page;
+mod pdf_export;
 mod print;
 mod session;
+mod workspace_io;
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -222,7 +225,10 @@ impl Tab {
             mood_items: Vec::new(),
             page_parent: None,
             page_title: String::new(),
-            workspace: Default::default(),
+            workspace: session::PageOptions {
+                uid: workspace_io::uid(),
+                ..Default::default()
+            },
         }
     }
 
@@ -241,7 +247,10 @@ impl Tab {
             mood_items: Vec::new(),
             page_parent: None,
             page_title: String::new(),
-            workspace: Default::default(),
+            workspace: session::PageOptions {
+                uid: workspace_io::uid(),
+                ..Default::default()
+            },
         })
     }
 
@@ -488,9 +497,75 @@ struct NotepadApp {
     last_selection: Option<(u64, usize, usize)>,
     selected_mood_item: Option<usize>,
     page_search: String,
+    sync_directory: Option<String>,
+    sync_baseline: Vec<session::SessionTab>,
+    last_sync: Instant,
+    selected_mood_tab: Option<u64>,
 }
 
 impl NotepadApp {
+    fn sync_workspace(&mut self, ctx: &egui::Context) {
+        let Some(dir) = self.sync_directory.clone() else {
+            return;
+        };
+        if self.last_sync.elapsed() < Duration::from_secs(5) {
+            return;
+        }
+        self.last_sync = Instant::now();
+        let result = (|| -> std::io::Result<()> {
+            let dir = PathBuf::from(dir);
+            let _lock = workspace_io::FolderLock::acquire(&dir)?;
+            let path = dir.join("notepad-rs-workspace.json");
+            let local = workspace_io::portable(self.session_snapshot(ctx))?;
+            let remote = if path.exists() {
+                workspace_io::read(&path)?
+            } else {
+                Session::default()
+            };
+            let (merged, conflicts) = workspace_io::merge(&local, &remote, &self.sync_baseline);
+            // Validate and materialize every incoming image before publishing or
+            // replacing live tabs. A bad attachment leaves both copies intact.
+            let mut ready = merged.clone();
+            for page in &mut ready.tabs {
+                workspace_io::materialize(page, &session::data_dir().join("assets"))?;
+            }
+            let merged_bytes = serde_json::to_vec(&merged.tabs)?;
+            let remote_bytes = serde_json::to_vec(&remote.tabs)?;
+            if merged_bytes != remote_bytes {
+                merged.save_to(&path)?;
+            }
+            if merged_bytes != serde_json::to_vec(&local.tabs)? {
+                let active_uid = self.tabs[self.active].workspace.uid.clone();
+                let mut tabs = Vec::new();
+                for page in ready.tabs {
+                    if let Some(tab) = self.restore_tab(page) {
+                        tabs.push(tab);
+                    }
+                }
+                if !tabs.is_empty() {
+                    self.tabs = tabs;
+                    self.active = self
+                        .tabs
+                        .iter()
+                        .position(|t| t.workspace.uid == active_uid)
+                        .unwrap_or(0);
+                    self.selected_mood_item = None;
+                }
+            }
+            self.sync_baseline = merged.tabs;
+            self.session_dirty = true;
+            if conflicts > 0 {
+                self.status =
+                    format!("Synchronisation : {conflicts} conflit(s), copies conservées");
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            self.status = format!("Synchronisation suspendue : {error}");
+        }
+        ctx.request_repaint_after(Duration::from_secs(5));
+    }
+
     fn workspace_tools(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let titles: Vec<String> = self
             .tabs
@@ -514,6 +589,7 @@ impl NotepadApp {
             .default_size(235.0)
             .resizable(true)
             .show(ui, |ui| {
+                egui::ScrollArea::vertical().id_salt("workspace-tools-scroll").show(ui, |ui| {
                 ui.heading("Page");
                 let tab = &mut self.tabs[active];
                 changed |= ui.checkbox(&mut tab.workspace.favorite, "Favori").changed();
@@ -526,6 +602,7 @@ impl NotepadApp {
                 changed |= ui
                     .color_edit_button_srgb(&mut tab.workspace.color)
                     .changed();
+                changed |= ui.checkbox(&mut tab.workspace.visual_blocks, "Éditeur visuel de blocs").changed();
                 ui.menu_button("Insérer un bloc", |ui| {
                     for (name, text) in [
                         ("Titre", "\n## Titre\n"),
@@ -569,14 +646,14 @@ impl NotepadApp {
                             select = Some(i);
                         }
                         if ui.small_button("Insérer").clicked() {
-                            insert = Some(format!("[[{title}]]"));
+                            insert = Some(format!("[[id:{}|{title}]]", self.tabs[i].workspace.uid));
                         }
                     });
                 }
                 ui.collapsing("Liens de cette page", |ui| {
                     for target in wiki_targets(&self.tabs[active].doc.text) {
-                        if let Some(i) = titles.iter().position(|title| title == &target) {
-                            if ui.link(&target).clicked() {
+                        if let Some(i) = resolve_page(&self.tabs, &target) {
+                            if ui.link(&titles[i]).clicked() {
                                 select = Some(i);
                             }
                         } else {
@@ -641,8 +718,12 @@ impl NotepadApp {
                             }
                         }
                     }
-                    if ui.button("PDF via l’impression Windows…").clicked() {
-                        self.print_active(ctx);
+                    if ui.button("Exporter .pdf…").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).save_file() {
+                            self.status = match pdf_export::export(&path, &titles[active], &self.tabs[active].doc.text) {
+                                Ok(()) => "PDF exporté".into(), Err(e) => format!("Export PDF impossible : {e}"),
+                            };
+                        }
                     }
                 });
                 ui.collapsing("Sauvegarde", |ui| {
@@ -651,7 +732,7 @@ impl NotepadApp {
                             .add_filter("Session JSON", &["json"])
                             .save_file()
                         {
-                            self.status = match self.session_snapshot(ctx).save_to(&path) {
+                            self.status = match workspace_io::portable(self.session_snapshot(ctx)).and_then(|s| s.save_to(&path)) {
                                 Ok(()) => "Sauvegarde terminée".into(),
                                 Err(e) => e.to_string(),
                             };
@@ -679,7 +760,7 @@ impl NotepadApp {
                                 Ok(())
                             };
                             self.status = match result
-                                .and_then(|_| self.session_snapshot(ctx).save_to(&path))
+                                .and_then(|_| workspace_io::portable(self.session_snapshot(ctx)).and_then(|s| s.save_to(&path)))
                             {
                                 Ok(()) => "Espace publié ; ancienne version sauvegardée".into(),
                                 Err(e) => e.to_string(),
@@ -691,13 +772,45 @@ impl NotepadApp {
                             import_workspace = Some(dir.join("notepad-rs-workspace.json"));
                         }
                     }
+                    if ui.button("Activer la synchronisation automatique…").clicked() {
+                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                            self.sync_directory = Some(dir.to_string_lossy().into_owned());
+                            self.sync_baseline.clear(); self.last_sync = Instant::now() - Duration::from_secs(6); changed = true;
+                        }
+                    }
+                    if self.sync_directory.is_some() {
+                        ui.label("Synchronisation toutes les 5 secondes ; les conflits sont conservés en copies.");
+                        if ui.button("Désactiver la synchronisation").clicked() { self.sync_directory = None; changed = true; }
+                    }
+                });
                 });
             });
         if let Some(path) = import_workspace {
-            match std::fs::read(&path).and_then(|bytes| {
-                serde_json::from_slice::<Session>(&bytes).map_err(std::io::Error::other)
-            }) {
-                Ok(saved) => {
+            match workspace_io::read(&path) {
+                Ok(mut saved) => {
+                    let mut mapping = std::collections::HashMap::new();
+                    for page in &mut saved.tabs {
+                        let old = page.workspace.uid.clone();
+                        page.workspace.uid = workspace_io::uid();
+                        if !old.is_empty() {
+                            mapping.insert(old, page.workspace.uid.clone());
+                        }
+                    }
+                    for page in &mut saved.tabs {
+                        if let Some(text) = &mut page.text {
+                            for (old, new) in &mapping {
+                                *text =
+                                    text.replace(&format!("[[id:{old}|"), &format!("[[id:{new}|"));
+                            }
+                        }
+                    }
+                    let validation = saved.tabs.iter_mut().try_for_each(|page| {
+                        workspace_io::materialize(page, &session::data_dir().join("assets"))
+                    });
+                    if let Err(error) = validation {
+                        self.status = format!("Sauvegarde non importée : {error}");
+                        return;
+                    }
                     let offset = self.next_id;
                     let count = saved.tabs.len();
                     for mut page in saved.tabs {
@@ -819,8 +932,14 @@ impl NotepadApp {
             last_selection: None,
             selected_mood_item: None,
             page_search: String::new(),
+            sync_directory: None,
+            sync_baseline: Vec::new(),
+            last_sync: Instant::now(),
+            selected_mood_tab: None,
         };
         if let Some(session) = session {
+            app.sync_directory = session.sync_directory.clone();
+            app.sync_baseline = session.sync_baseline.clone();
             app.theme = match session.theme {
                 1 => ThemeMode::Light,
                 2 => ThemeMode::Dark,
@@ -868,7 +987,13 @@ impl NotepadApp {
 
     /// Reconstruit un onglet depuis la session : texte autosauvegarde s'il
     /// existe, sinon relecture du fichier sur disque.
-    fn restore_tab(&mut self, saved: session::SessionTab) -> Option<Tab> {
+    fn restore_tab(&mut self, mut saved: session::SessionTab) -> Option<Tab> {
+        if let Err(error) =
+            workspace_io::materialize(&mut saved, &session::data_dir().join("assets"))
+        {
+            self.status = format!("Pièce jointe invalide : {error}");
+            return None;
+        }
         let id = self.next_id;
         self.next_id += 1;
         let path = saved.path.map(PathBuf::from);
@@ -910,6 +1035,9 @@ impl NotepadApp {
         tab.page_parent = saved.parent_id;
         tab.page_title = saved.page_title;
         tab.workspace = saved.workspace;
+        if tab.workspace.uid.is_empty() {
+            tab.workspace.uid = workspace_io::uid();
+        }
         tab.mood_items = saved.mood_items;
         // Un fichier relu sur disque peut avoir ete reinterprete dans un autre
         // codage sans etre modifie : on reapplique le choix de l'utilisateur.
@@ -941,6 +1069,7 @@ impl NotepadApp {
         let id = self.next_id;
         self.next_id += 1;
         let mut tab = Tab::new(id);
+        tab.workspace.uid = workspace_io::uid();
         tab.doc.wrap = self.default_wrap;
         tab.doc.font_size = self.default_font_size;
         self.tabs.push(tab);
@@ -1305,13 +1434,17 @@ impl NotepadApp {
             window,
             recent: self.recent.clone(),
             page: self.page.clone(),
+            sync_directory: self.sync_directory.clone(),
+            sync_baseline: self.sync_baseline.clone(),
         }
     }
 
     fn save_session(&mut self, ctx: &egui::Context) {
         let snapshot = self.session_snapshot(ctx);
-        let _ = snapshot.save_to(&self.session_file);
-        self.session_dirty = false;
+        match snapshot.save_to(&self.session_file) {
+            Ok(()) => self.session_dirty = false,
+            Err(error) => self.status = format!("Session non enregistrée : {error}"),
+        }
         self.last_session_save = Instant::now();
     }
 
@@ -1450,6 +1583,11 @@ impl NotepadApp {
 
     /// Apercu Markdown de l'onglet actif, cote a cote avec l'editeur.
     fn moodboard_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let current = self.active_tab().doc.id;
+        if self.selected_mood_tab != Some(current) {
+            self.selected_mood_tab = Some(current);
+            self.selected_mood_item = None;
+        }
         let before = serde_json::to_vec(&self.active_tab().mood_items).ok();
         let mut remove = None;
         let mut duplicate = None;
@@ -1467,6 +1605,7 @@ impl NotepadApp {
                     height: 130.0,
                     color: (n as u8) % 4,
                     link: None,
+                    embedded_image: None,
                 });
                 self.selected_mood_item = Some(self.active_tab().mood_items.len() - 1);
             }
@@ -1481,13 +1620,21 @@ impl NotepadApp {
             }
         });
         if export {
-            let path = std::env::current_dir()
-                .unwrap_or_default()
-                .join("moodboard_export.json");
-            if let Ok(data) = serde_json::to_vec_pretty(&self.active_tab().mood_items) {
-                if std::fs::write(&path, data).is_ok() {
-                    self.status = format!("Moodboard exporté : {}", path.display());
-                }
+            if let Some(path) = rfd::FileDialog::new()
+                .set_file_name("moodboard.json")
+                .add_filter("JSON", &["json"])
+                .save_file()
+            {
+                let result = workspace_io::portable(self.session_snapshot(ctx))
+                    .and_then(|s| {
+                        serde_json::to_vec_pretty(&s.tabs[self.active].mood_items)
+                            .map_err(std::io::Error::other)
+                    })
+                    .and_then(|bytes| std::fs::write(path, bytes));
+                self.status = match result {
+                    Ok(()) => "Moodboard exporté avec ses images".into(),
+                    Err(e) => format!("Export impossible : {e}"),
+                };
             }
         }
         if let Some(i) = remove {
@@ -1517,7 +1664,10 @@ impl NotepadApp {
             let id = egui::Id::unique(("mood-item", tab_id, index));
             let shown = egui::Area::new(id)
                 .fixed_pos(response.rect.min + egui::vec2(item.x, item.y))
+                .movable(false)
                 .show(ctx, |ui| {
+                    ui.set_clip_rect(response.rect);
+                    ui.set_width(item.width);
                     let fill = match item.color {
                         1 => egui::Color32::from_rgb(220, 240, 180),
                         2 => egui::Color32::from_rgb(190, 225, 250),
@@ -1534,14 +1684,16 @@ impl NotepadApp {
                         .stroke(stroke)
                         .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
-                            let drag = ui.allocate_response(
-                                egui::vec2(ui.available_width(), 18.0),
-                                egui::Sense::drag(),
+                            let drag = ui.add(
+                                egui::Label::new("↕ déplacer / sélectionner")
+                                    .sense(egui::Sense::click_and_drag()),
                             );
-                            ui.label("↕ déplacer");
+                            if drag.clicked() || drag.drag_started() {
+                                clicked_item = Some(index);
+                            }
                             if drag.dragged() {
-                                item.x += drag.drag_delta().x;
-                                item.y += drag.drag_delta().y;
+                                item.x = (item.x + drag.drag_delta().x).max(0.0);
+                                item.y = (item.y + drag.drag_delta().y).max(0.0);
                             }
                             ui.horizontal(|ui| {
                                 ui.label("Couleur");
@@ -2986,6 +3138,7 @@ impl eframe::App for NotepadApp {
                     height: 180.0,
                     color: 0,
                     link: None,
+                    embedded_image: None,
                 });
                 self.active_tab_mut().doc.dirty = true;
                 self.session_dirty = true;
@@ -3091,121 +3244,134 @@ impl eframe::App for NotepadApp {
             .resizable(true)
             .default_size(230.0)
             .show(ui, |ui| {
-                ui.heading("Pages");
-                ui.add(egui::TextEdit::singleline(&mut self.page_search).hint_text("Rechercher…"));
-                ui.separator();
-                if ui.button("+ Nouvelle page").clicked() {
-                    create_page = true;
-                }
-                if ui.button("+ Sous-page").clicked() {
-                    create_child = true;
-                }
-                ui.menu_button("Nouveau modèle", |ui| {
-                    if ui.button("Notes structurées").clicked() {
-                        template = Some("# Notes\n\n## À retenir\n\n## Actions\n- ");
-                        ui.close();
-                    }
-                    if ui.button("Projet").clicked() {
-                        template = Some("# Projet\n\n## Objectif\n\n## Tâches\n- [ ] ");
-                        ui.close();
-                    }
-                    if ui.button("Réunion").clicked() {
-                        template = Some("# Réunion\n\nDate :\nParticipants :\n\n## Compte rendu\n");
-                        ui.close();
-                    }
-                });
-                ui.add_space(4.0);
-                for (index, tab) in self.tabs.iter_mut().enumerate() {
-                    let query = self.page_search.to_lowercase();
-                    if tab.workspace.trashed {
-                        continue;
-                    }
-                    if !query.is_empty()
-                        && !tab.page_title.to_lowercase().contains(&query)
-                        && !tab.doc.title().to_lowercase().contains(&query)
-                        && !tab.doc.text.to_lowercase().contains(&query)
-                    {
-                        continue;
-                    }
-                    let mut depth = 0;
-                    let mut parent = tab.page_parent;
-                    let mut seen = std::collections::HashSet::from([tab.doc.id]);
-                    while let Some(id) = parent {
-                        if !seen.insert(id) || !parents.contains_key(&id) {
-                            break;
-                        }
-                        depth += 1;
-                        parent = parents[&id];
-                    }
-                    ui.horizontal(|ui| {
-                        ui.add_space(depth as f32 * 18.0);
-                        let icon = if !tab.workspace.icon.is_empty() {
-                            tab.workspace.icon.as_str()
-                        } else if tab.doc.moodboard {
-                            "🎨"
-                        } else {
-                            "📄"
-                        };
-                        let mut title = if tab.page_title.is_empty() {
-                            tab.doc.title()
-                        } else {
-                            tab.page_title.clone()
-                        };
-                        let response = ui.add(
-                            egui::TextEdit::singleline(&mut title)
-                                .desired_width(150.0)
-                                .hint_text("Nom de la page"),
+                egui::ScrollArea::vertical()
+                    .id_salt("pages-navigation-scroll")
+                    .show(ui, |ui| {
+                        ui.heading("Pages");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.page_search)
+                                .hint_text("Rechercher…"),
                         );
-                        if response.changed() {
-                            tab.page_title = title;
-                            renamed_page = true;
+                        ui.separator();
+                        if ui.button("+ Nouvelle page").clicked() {
+                            create_page = true;
                         }
-                        let color = if tab.workspace.color == [0, 0, 0] {
-                            ui.visuals().text_color()
-                        } else {
-                            egui::Color32::from_rgb(
-                                tab.workspace.color[0],
-                                tab.workspace.color[1],
-                                tab.workspace.color[2],
-                            )
-                        };
-                        if ui
-                            .small_button(egui::RichText::new(icon).color(color))
-                            .clicked()
-                        {
-                            page_to_select = Some(index);
+                        if ui.button("+ Sous-page").clicked() {
+                            create_child = true;
+                        }
+                        ui.menu_button("Nouveau modèle", |ui| {
+                            if ui.button("Notes structurées").clicked() {
+                                template = Some("# Notes\n\n## À retenir\n\n## Actions\n- ");
+                                ui.close();
+                            }
+                            if ui.button("Projet").clicked() {
+                                template = Some("# Projet\n\n## Objectif\n\n## Tâches\n- [ ] ");
+                                ui.close();
+                            }
+                            if ui.button("Réunion").clicked() {
+                                template = Some(
+                                    "# Réunion\n\nDate :\nParticipants :\n\n## Compte rendu\n",
+                                );
+                                ui.close();
+                            }
+                        });
+                        ui.add_space(4.0);
+                        for (index, tab) in self.tabs.iter_mut().enumerate() {
+                            let query = self.page_search.to_lowercase();
+                            if tab.workspace.trashed {
+                                continue;
+                            }
+                            if !query.is_empty()
+                                && !tab.page_title.to_lowercase().contains(&query)
+                                && !tab.doc.title().to_lowercase().contains(&query)
+                                && !tab.doc.text.to_lowercase().contains(&query)
+                            {
+                                continue;
+                            }
+                            let mut depth = 0;
+                            let mut parent = tab.page_parent;
+                            let mut seen = std::collections::HashSet::from([tab.doc.id]);
+                            while let Some(id) = parent {
+                                if !seen.insert(id) || !parents.contains_key(&id) {
+                                    break;
+                                }
+                                depth += 1;
+                                parent = parents[&id];
+                            }
+                            ui.horizontal(|ui| {
+                                ui.add_space(depth as f32 * 18.0);
+                                let icon = if !tab.workspace.icon.is_empty() {
+                                    tab.workspace.icon.as_str()
+                                } else if tab.doc.moodboard {
+                                    "🎨"
+                                } else {
+                                    "📄"
+                                };
+                                let mut title = if tab.page_title.is_empty() {
+                                    tab.doc.title()
+                                } else {
+                                    tab.page_title.clone()
+                                };
+                                let previous_title = title.clone();
+                                let response = ui.add(
+                                    egui::TextEdit::singleline(&mut title)
+                                        .desired_width(150.0)
+                                        .hint_text("Nom de la page"),
+                                );
+                                if response.changed() {
+                                    if !previous_title.is_empty()
+                                        && !tab.workspace.aliases.contains(&previous_title)
+                                    {
+                                        tab.workspace.aliases.push(previous_title);
+                                    }
+                                    tab.page_title = title;
+                                    renamed_page = true;
+                                }
+                                let color = if tab.workspace.color == [0, 0, 0] {
+                                    ui.visuals().text_color()
+                                } else {
+                                    egui::Color32::from_rgb(
+                                        tab.workspace.color[0],
+                                        tab.workspace.color[1],
+                                        tab.workspace.color[2],
+                                    )
+                                };
+                                if ui
+                                    .small_button(egui::RichText::new(icon).color(color))
+                                    .clicked()
+                                {
+                                    page_to_select = Some(index);
+                                }
+                            });
+                        }
+                        ui.separator();
+                        ui.label("Backlinks");
+                        let mut backlink_indices = Vec::new();
+                        for (index, tab) in self.tabs.iter().enumerate() {
+                            if index != self.active
+                                && !tab.workspace.trashed
+                                && wiki_targets(&tab.doc.text).iter().any(|target| {
+                                    resolve_page(&self.tabs, target) == Some(self.active)
+                                })
+                            {
+                                backlink_indices.push(index);
+                            }
+                        }
+                        if backlink_indices.is_empty() {
+                            ui.small("Aucune référence");
+                        }
+                        for index in backlink_indices {
+                            let label = self.tabs[index].page_title.clone();
+                            let label = if label.is_empty() {
+                                self.tabs[index].doc.title()
+                            } else {
+                                label
+                            };
+                            if ui.selectable_label(false, format!("↗ {label}")).clicked() {
+                                page_to_select = Some(index);
+                            }
                         }
                     });
-                }
-                ui.separator();
-                ui.label("Backlinks");
-                let active_title = self.active_tab().page_title.clone();
-                let active_title = if active_title.is_empty() {
-                    self.active_tab().doc.title()
-                } else {
-                    active_title
-                };
-                let token = format!("[[{}]]", active_title);
-                let mut backlink_indices = Vec::new();
-                for (index, tab) in self.tabs.iter().enumerate() {
-                    if index != self.active && tab.doc.text.contains(&token) {
-                        backlink_indices.push(index);
-                    }
-                }
-                if backlink_indices.is_empty() {
-                    ui.small("Aucune référence");
-                }
-                for index in backlink_indices {
-                    let label = self.tabs[index].page_title.clone();
-                    let label = if label.is_empty() {
-                        self.tabs[index].doc.title()
-                    } else {
-                        label
-                    };
-                    if ui.selectable_label(false, format!("↗ {label}")).clicked() {
-                        page_to_select = Some(index);
-                    }
-                }
             });
         self.workspace_tools(ui, &ctx);
         if renamed_page {
@@ -3236,6 +3402,14 @@ impl eframe::App for NotepadApp {
             } else {
                 if self.tabs[self.active].doc.moodboard {
                     self.moodboard_ui(ui, &ctx);
+                    return;
+                }
+                if self.tabs[self.active].workspace.visual_blocks {
+                    let id = self.tabs[self.active].doc.id;
+                    if blocks::editor(ui, id, &mut self.tabs[self.active].doc.text) {
+                        self.tabs[self.active].touch();
+                        typed = true;
+                    }
                     return;
                 }
                 let side_by_side =
@@ -3573,6 +3747,7 @@ impl eframe::App for NotepadApp {
             self.handle_action(&ctx, action);
         }
 
+        self.sync_workspace(&ctx);
         if self.close_requested {
             self.close_requested = false;
             self.save_session(&ctx);
@@ -3603,9 +3778,219 @@ fn wiki_targets(text: &str) -> Vec<String> {
     targets
 }
 
+fn resolve_page(tabs: &[Tab], target: &str) -> Option<usize> {
+    if let Some(stable) = target.strip_prefix("id:") {
+        let uid = stable.split('|').next().unwrap_or(stable);
+        return tabs
+            .iter()
+            .position(|t| !t.workspace.trashed && t.workspace.uid == uid);
+    }
+    let matches = |tab: &&Tab| {
+        !tab.workspace.trashed
+            && (tab.page_title == target
+                || (tab.page_title.is_empty() && tab.doc.title() == target))
+    };
+    let exact: Vec<usize> = tabs
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| matches(t))
+        .map(|(i, _)| i)
+        .collect();
+    if exact.len() == 1 {
+        return Some(exact[0]);
+    }
+    if !exact.is_empty() {
+        return None;
+    }
+    let aliases: Vec<usize> = tabs
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| !t.workspace.trashed && t.workspace.aliases.iter().any(|a| a == target))
+        .map(|(i, _)| i)
+        .collect();
+    if aliases.len() == 1 {
+        Some(aliases[0])
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod workspace_tests {
     use super::*;
+
+    #[test]
+    fn two_instances_sync_concurrent_edits_without_losing_either_text() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut base = Session::default();
+        let mut page = session::SessionTab::default();
+        page.page_id = 1;
+        page.text = Some("Base".into());
+        page.workspace.uid = "shared-stable-id".into();
+        base.tabs.push(page);
+        let dir =
+            std::env::temp_dir().join(format!("notepad-rs-sync-test-{}", workspace_io::uid()));
+        let mut a = NotepadApp::new(&cc, Some(base.clone()), dir.join("unused-a.json"));
+        let mut b = NotepadApp::new(&cc, Some(base), dir.join("unused-b.json"));
+        for app in [&mut a, &mut b] {
+            app.sync_directory = Some(dir.to_string_lossy().into_owned());
+            app.last_sync = Instant::now() - Duration::from_secs(6);
+            app.sync_workspace(&ctx);
+        }
+        a.active_tab_mut().doc.text = "Modification A".into();
+        b.active_tab_mut().doc.text = "Modification B".into();
+        for app in [&mut a, &mut b] {
+            app.last_sync = Instant::now() - Duration::from_secs(6);
+            app.sync_workspace(&ctx);
+        }
+        a.last_sync = Instant::now() - Duration::from_secs(6);
+        a.sync_workspace(&ctx);
+        let remote = workspace_io::read(&dir.join("notepad-rs-workspace.json")).unwrap();
+        assert!(remote
+            .tabs
+            .iter()
+            .any(|p| p.text.as_deref() == Some("Modification A")));
+        assert!(remote
+            .tabs
+            .iter()
+            .any(|p| p.text.as_deref() == Some("Modification B")));
+        assert_eq!(remote.tabs.len(), 2);
+        assert_eq!(a.tabs.len(), 2);
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            std::fs::remove_file(entry.unwrap().path()).unwrap();
+        }
+        std::fs::remove_dir(dir).unwrap();
+    }
+
+    fn mood_frame(
+        app: &mut NotepadApp,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1100.0, 800.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| app.moodboard_ui(ui, ctx));
+        output.textures_delta.clear();
+        output
+    }
+
+    fn label_position(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(t) if t.galley.text() == label => {
+                    Some(t.pos + egui::vec2(5.0, 5.0))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("Missing label: {label}"))
+    }
+
+    fn pointer(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        }
+    }
+
+    #[test]
+    fn moodboard_selection_duplicate_delete_and_drag_survive_restore() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = NotepadApp::new(
+            &cc,
+            None,
+            std::env::temp_dir().join("unused-notepad-rs-test-session.json"),
+        );
+        app.new_moodboard();
+        mood_frame(&mut app, &ctx, vec![]);
+        let output = mood_frame(&mut app, &ctx, vec![]);
+        let header = label_position(&output, "↕ déplacer / sélectionner");
+        mood_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(header), pointer(header, true)],
+        );
+        mood_frame(&mut app, &ctx, vec![pointer(header, false)]);
+        assert_eq!(app.selected_mood_item, Some(0));
+        let output = mood_frame(&mut app, &ctx, vec![]);
+        let duplicate = label_position(&output, "Dupliquer");
+        mood_frame(
+            &mut app,
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(duplicate),
+                pointer(duplicate, true),
+            ],
+        );
+        mood_frame(&mut app, &ctx, vec![pointer(duplicate, false)]);
+        assert_eq!(app.active_tab().mood_items.len(), 2);
+        let output = mood_frame(&mut app, &ctx, vec![]);
+        let delete = label_position(&output, "Supprimer");
+        mood_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(delete), pointer(delete, true)],
+        );
+        mood_frame(&mut app, &ctx, vec![pointer(delete, false)]);
+        assert_eq!(app.active_tab().mood_items.len(), 1);
+        let output = mood_frame(&mut app, &ctx, vec![]);
+        let header = label_position(&output, "↕ déplacer / sélectionner");
+        let before = app.active_tab().mood_items[0].x;
+        mood_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(header), pointer(header, true)],
+        );
+        let end = header + egui::vec2(50.0, 30.0);
+        mood_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(end)]);
+        mood_frame(&mut app, &ctx, vec![pointer(end, false)]);
+        let moved = app.active_tab().mood_items[0].x;
+        assert!(moved > before);
+        let snapshot = app.session_snapshot(&ctx);
+        let restored = NotepadApp::new(
+            &cc,
+            Some(snapshot),
+            std::env::temp_dir().join("unused-notepad-rs-test-session.json"),
+        );
+        assert_eq!(restored.active_tab().mood_items[0].x, moved);
+    }
+
+    #[test]
+    fn stable_links_and_old_names_survive_page_rename() {
+        let mut tab = Tab::new(1);
+        tab.workspace.uid = "stable".into();
+        tab.page_title = "Nouveau nom".into();
+        tab.workspace.aliases.push("Ancien nom".into());
+        let tabs = vec![tab];
+        assert_eq!(resolve_page(&tabs, "id:stable|Ancien nom"), Some(0));
+        assert_eq!(resolve_page(&tabs, "Ancien nom"), Some(0));
+        assert_eq!(resolve_page(&tabs, "Nouveau nom"), Some(0));
+    }
+
+    #[test]
+    fn ambiguous_names_and_trashed_targets_are_not_resolved() {
+        let mut a = Tab::new(1);
+        a.page_title = "Même nom".into();
+        let mut b = Tab::new(2);
+        b.page_title = "Même nom".into();
+        let mut tabs = vec![a, b];
+        assert_eq!(resolve_page(&tabs, "Même nom"), None);
+        tabs[1].workspace.trashed = true;
+        assert_eq!(resolve_page(&tabs, "Même nom"), Some(0));
+        tabs[0].workspace.trashed = true;
+        assert_eq!(resolve_page(&tabs, "Même nom"), None);
+    }
 
     #[test]
     fn links_trim_deduplicate_and_ignore_unclosed_targets() {

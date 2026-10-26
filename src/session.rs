@@ -41,6 +41,8 @@ pub struct Session {
     pub recent: Vec<String>,
     /// Mise en page (papier, orientation, marges).
     pub page: PageSetup,
+    pub sync_directory: Option<String>,
+    pub sync_baseline: Vec<SessionTab>,
 }
 
 impl Default for Session {
@@ -56,6 +58,8 @@ impl Default for Session {
             window: None,
             recent: Vec::new(),
             page: PageSetup::default(),
+            sync_directory: None,
+            sync_baseline: Vec::new(),
         }
     }
 }
@@ -93,6 +97,9 @@ pub struct SessionTab {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PageOptions {
+    pub uid: String,
+    pub aliases: Vec<String>,
+    pub visual_blocks: bool,
     pub favorite: bool,
     pub pinned: bool,
     pub trashed: bool,
@@ -113,6 +120,7 @@ pub struct MoodItem {
     pub color: u8,
     #[serde(default)]
     pub link: Option<String>,
+    pub embedded_image: Option<Vec<u8>>,
 }
 
 impl Default for MoodItem {
@@ -126,6 +134,7 @@ impl Default for MoodItem {
             height: 130.0,
             color: 0,
             link: None,
+            embedded_image: None,
         }
     }
 }
