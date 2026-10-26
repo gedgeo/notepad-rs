@@ -27,11 +27,20 @@ Les options de page se trouvent dans le panneau droit. La navigation et le renom
 
 ## Vérification
 
-89 tests Rust réussis et compilation de développement réussie via `build.ps1` (WinLibs). Les nouveaux tests vérifient le PDF avec accents, les liens après renommage, les noms ambigus, la corbeille, la restauration d'images après suppression de l'original, les conflits de synchronisation, le verrou du dossier et l'échange de deux instances simulées.
+93 tests Rust réussis après la refonte d'interface et compilation de développement réussie via `build.ps1` (WinLibs). Les tests vérifient le PDF avec accents, les liens après renommage, les noms ambigus, la corbeille, la restauration d'images après suppression de l'original, les conflits de synchronisation, le verrou du dossier, l'échange de deux instances simulées, la nouvelle navigation et la mise en forme des blocs.
 
 Les tests egui simulent les clics et le déplacement du moodboard, sa duplication/suppression et sa restauration. Ils vérifient aussi la tâche à cocher en mode blocs et l'absence de réécriture du document lors du simple affichage.
 
-Le test visuel de bout en bout sur le bureau Windows n'a pas pu être réalisé : le service de contrôle Windows échoue au démarrage avec `MXC launcher: enumerate MXC volume E:`. Les tests egui ne remplacent pas cette vérification sur écran.
+Les vues texte, blocs et moodboard ont été capturées avec le moteur natif et comparées aux maquettes validées. Une petite fenêtre et le thème sombre disposent également de captures. Le service de contrôle Windows externe reste bloqué par MXC : les gestes sont testés par événements egui et les captures ne remplacent pas une vérification manuelle des dialogues Windows. Voir `design-qa.md` et `INTERFACE.md`.
+
+## Refonte d'interface
+
+- Navigation repliable avec recherche, favoris, pages hiérarchiques et moodboards.
+- Document centré, titres lisibles et outils contextuels plutôt que deux panneaux permanents.
+- Inspecteur des blocs et des éléments sélectionnés, aperçu des images et outils avant/arrière.
+- Canevas de moodboard avec grille, zoom, déplacement du fond, ajustement au contenu et poignée de redimensionnement.
+- Échelle de l'interface réglable et mémorisée ; navigation et propriétés superposées pour les petites fenêtres.
+- Les fonctions historiques restent disponibles dans les menus et les paramètres.
 
 ## Utilisation des ajouts de finalisation
 

@@ -20,6 +20,7 @@ mod page;
 mod pdf_export;
 mod print;
 mod session;
+mod ui_design;
 mod workspace_io;
 
 use std::path::PathBuf;
@@ -36,9 +37,16 @@ fn main() -> eframe::Result<()> {
     // la session precedente.
     let mut restore = true;
     let mut initial_path: Option<PathBuf> = None;
+    let mut design_preview = None;
+    let mut capture_to = None;
     for arg in std::env::args_os().skip(1) {
         let text = arg.to_string_lossy().to_string();
-        if text == "--new-window" || text == "--no-restore" {
+        if let Some(mode) = text.strip_prefix("--design-preview=") {
+            design_preview = Some(mode.to_owned());
+            restore = false;
+        } else if let Some(path) = text.strip_prefix("--capture-to=") {
+            capture_to = Some(path.to_owned());
+        } else if text == "--new-window" || text == "--no-restore" {
             restore = false;
         } else if !text.starts_with('-') && initial_path.is_none() {
             initial_path = Some(PathBuf::from(arg));
@@ -53,11 +61,21 @@ fn main() -> eframe::Result<()> {
     // Un fichier en argument ne restaure pas la session, comme le Bloc-notes
     // ouvert par association de fichiers.
     let restore = restore && initial_path.is_none();
-    let size = saved
-        .window
-        .filter(|size| size[0] >= 460.0 && size[1] >= 300.0)
-        .map(clamp_window_size)
-        .unwrap_or([920.0, 660.0]);
+    let size = if design_preview
+        .as_deref()
+        .map(|mode| mode.contains("narrow"))
+        .unwrap_or(false)
+    {
+        [640.0, 700.0]
+    } else if design_preview.is_some() {
+        [1440.0, 980.0]
+    } else {
+        saved
+            .window
+            .filter(|size| size[0] >= 460.0 && size[1] >= 300.0)
+            .map(clamp_window_size)
+            .unwrap_or([1200.0, 800.0])
+    };
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -73,6 +91,14 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |cc| {
             let mut app = NotepadApp::new(cc, session.clone(), session_file.clone());
+            if let Some(mode) = &design_preview {
+                app.setup_preview(
+                    mode,
+                    capture_to
+                        .as_deref()
+                        .unwrap_or("samples/previews/interface.png"),
+                );
+            }
             if let Some(path) = initial_path.clone() {
                 if path.exists() {
                     app.open_path(path);
@@ -434,6 +460,7 @@ fn available_system_fonts() -> Vec<(&'static str, PathBuf)> {
 }
 
 struct NotepadApp {
+    design: ui_design::State,
     tabs: Vec<Tab>,
     active: usize,
     next_id: u64,
@@ -590,7 +617,7 @@ impl NotepadApp {
             .resizable(true)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().id_salt("workspace-tools-scroll").show(ui, |ui| {
-                ui.heading("Page");
+                ui.horizontal(|ui|{ui.heading("Espace de travail");if ui.small_button("Fermer").clicked(){self.design.settings=false;}});
                 let tab = &mut self.tabs[active];
                 changed |= ui.checkbox(&mut tab.workspace.favorite, "Favori").changed();
                 changed |= ui.checkbox(&mut tab.workspace.pinned, "Épinglée").changed();
@@ -891,7 +918,30 @@ impl NotepadApp {
         session_file: PathBuf,
     ) -> NotepadApp {
         cc.egui_ctx.set_theme(egui::ThemePreference::System);
+        cc.egui_ctx.set_zoom_factor(1.25);
+        let mut fonts = egui::FontDefinitions::default();
+        fonts.font_data.insert(
+            "phosphor".into(),
+            egui::FontData::from_static(egui_phosphor::Variant::Regular.font_bytes()).into(),
+        );
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .push("phosphor".into());
+        if let Ok(bytes) = std::fs::read(windows_fonts_dir().join("segoeui.ttf")) {
+            fonts
+                .font_data
+                .insert("segoe-ui".into(), egui::FontData::from_owned(bytes).into());
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .insert(0, "segoe-ui".into());
+        }
+        cc.egui_ctx.set_fonts(fonts);
         let mut app = NotepadApp {
+            design: ui_design::State::default(),
             tabs: Vec::new(),
             active: 0,
             next_id: 0,
@@ -902,7 +952,7 @@ impl NotepadApp {
             show_about: false,
             show_font: false,
             goto_line: String::new(),
-            theme: ThemeMode::System,
+            theme: ThemeMode::Light,
             status_bar: true,
             font_family: None,
             loaded_fonts: std::collections::HashSet::new(),
@@ -920,7 +970,7 @@ impl NotepadApp {
             last_session_save: Instant::now(),
             status: String::new(),
             show_markdown_preview: false,
-            show_format_bar: true,
+            show_format_bar: false,
             page: page::PageSetup::default(),
             show_page_setup: false,
             show_print_preview: false,
@@ -938,6 +988,10 @@ impl NotepadApp {
             selected_mood_tab: None,
         };
         if let Some(session) = session {
+            cc.egui_ctx
+                .set_zoom_factor(session.interface_scale.clamp(0.8, 1.75));
+            app.design.sidebar = session.navigation_visible;
+            app.design.sidebar_width = session.navigation_width.clamp(190.0, 340.0);
             app.sync_directory = session.sync_directory.clone();
             app.sync_baseline = session.sync_baseline.clone();
             app.theme = match session.theme {
@@ -1414,10 +1468,12 @@ impl NotepadApp {
             })
             .collect();
         let window = ctx.input(|input| {
-            input
-                .viewport()
-                .inner_rect
-                .map(|rect| [rect.width(), rect.height()])
+            input.viewport().inner_rect.map(|rect| {
+                [
+                    rect.width() * ctx.zoom_factor(),
+                    rect.height() * ctx.zoom_factor(),
+                ]
+            })
         });
         Session {
             tabs,
@@ -1436,10 +1492,16 @@ impl NotepadApp {
             page: self.page.clone(),
             sync_directory: self.sync_directory.clone(),
             sync_baseline: self.sync_baseline.clone(),
+            navigation_visible: self.design.sidebar,
+            navigation_width: self.design.sidebar_width,
+            interface_scale: ctx.zoom_factor(),
         }
     }
 
     fn save_session(&mut self, ctx: &egui::Context) {
+        if self.design.capture.is_some() {
+            return;
+        }
         let snapshot = self.session_snapshot(ctx);
         match snapshot.save_to(&self.session_file) {
             Ok(()) => self.session_dirty = false,
@@ -1504,7 +1566,7 @@ impl NotepadApp {
     /// Editeur de l'onglet actif. Renvoie `true` si le texte a change.
     fn editor_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> bool {
         let index = self.active;
-        let font = self.editor_font(self.tabs[index].doc.font_size);
+        let font = self.editor_font(self.tabs[index].doc.font_size * 17.0 / 15.0);
         let tab = &mut self.tabs[index];
         let wrap = tab.doc.wrap;
         let width = ui.available_width();
@@ -1530,6 +1592,8 @@ impl NotepadApp {
                 .desired_width(desired)
                 .desired_rows(30)
                 .lock_focus(true)
+                .frame(egui::Frame::NONE)
+                .hint_text("Commencez à écrire…")
                 .show(ui)
         });
 
@@ -1582,180 +1646,6 @@ impl NotepadApp {
     }
 
     /// Apercu Markdown de l'onglet actif, cote a cote avec l'editeur.
-    fn moodboard_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let current = self.active_tab().doc.id;
-        if self.selected_mood_tab != Some(current) {
-            self.selected_mood_tab = Some(current);
-            self.selected_mood_item = None;
-        }
-        let before = serde_json::to_vec(&self.active_tab().mood_items).ok();
-        let mut remove = None;
-        let mut duplicate = None;
-        let mut export = false;
-        ui.horizontal(|ui| {
-            ui.heading("Moodboard");
-            if ui.button("+ Note").clicked() {
-                let n = self.active_tab().mood_items.len() as f32;
-                self.active_tab_mut().mood_items.push(session::MoodItem {
-                    text: "Nouvelle note".into(),
-                    image_path: None,
-                    x: 40.0 + n * 24.0,
-                    y: 40.0 + n * 24.0,
-                    width: 190.0,
-                    height: 130.0,
-                    color: (n as u8) % 4,
-                    link: None,
-                    embedded_image: None,
-                });
-                self.selected_mood_item = Some(self.active_tab().mood_items.len() - 1);
-            }
-            if ui.button("Supprimer").clicked() {
-                remove = self.selected_mood_item;
-            }
-            if ui.button("Dupliquer").clicked() {
-                duplicate = self.selected_mood_item;
-            }
-            if ui.button("Exporter").clicked() {
-                export = true;
-            }
-        });
-        if export {
-            if let Some(path) = rfd::FileDialog::new()
-                .set_file_name("moodboard.json")
-                .add_filter("JSON", &["json"])
-                .save_file()
-            {
-                let result = workspace_io::portable(self.session_snapshot(ctx))
-                    .and_then(|s| {
-                        serde_json::to_vec_pretty(&s.tabs[self.active].mood_items)
-                            .map_err(std::io::Error::other)
-                    })
-                    .and_then(|bytes| std::fs::write(path, bytes));
-                self.status = match result {
-                    Ok(()) => "Moodboard exporté avec ses images".into(),
-                    Err(e) => format!("Export impossible : {e}"),
-                };
-            }
-        }
-        if let Some(i) = remove {
-            if i < self.active_tab().mood_items.len() {
-                self.active_tab_mut().mood_items.remove(i);
-                self.selected_mood_item = None;
-                self.active_tab_mut().doc.dirty = true;
-                self.session_dirty = true;
-            }
-        }
-        if let Some(i) = duplicate {
-            if let Some(mut item) = self.active_tab().mood_items.get(i).cloned() {
-                item.x += 24.0;
-                item.y += 24.0;
-                self.active_tab_mut().mood_items.push(item);
-                self.selected_mood_item = Some(self.active_tab().mood_items.len() - 1);
-                self.active_tab_mut().doc.dirty = true;
-                self.session_dirty = true;
-            }
-        }
-        let (response, _) = ui.allocate_painter(ui.available_size(), egui::Sense::hover());
-        let tab_id = self.active_tab().doc.id;
-        let selected = self.selected_mood_item;
-        let tab = self.active_tab_mut();
-        let mut clicked_item = None;
-        for (index, item) in tab.mood_items.iter_mut().enumerate() {
-            let id = egui::Id::unique(("mood-item", tab_id, index));
-            let shown = egui::Area::new(id)
-                .fixed_pos(response.rect.min + egui::vec2(item.x, item.y))
-                .movable(false)
-                .show(ctx, |ui| {
-                    ui.set_clip_rect(response.rect);
-                    ui.set_width(item.width);
-                    let fill = match item.color {
-                        1 => egui::Color32::from_rgb(220, 240, 180),
-                        2 => egui::Color32::from_rgb(190, 225, 250),
-                        3 => egui::Color32::from_rgb(245, 205, 220),
-                        _ => egui::Color32::from_rgb(250, 235, 160),
-                    };
-                    let stroke = if selected == Some(index) {
-                        egui::Stroke::new(3.0, egui::Color32::from_rgb(40, 100, 220))
-                    } else {
-                        egui::Stroke::NONE
-                    };
-                    egui::Frame::NONE
-                        .fill(fill)
-                        .stroke(stroke)
-                        .inner_margin(egui::Margin::same(10))
-                        .show(ui, |ui| {
-                            let drag = ui.add(
-                                egui::Label::new("↕ déplacer / sélectionner")
-                                    .sense(egui::Sense::click_and_drag()),
-                            );
-                            if drag.clicked() || drag.drag_started() {
-                                clicked_item = Some(index);
-                            }
-                            if drag.dragged() {
-                                item.x = (item.x + drag.drag_delta().x).max(0.0);
-                                item.y = (item.y + drag.drag_delta().y).max(0.0);
-                            }
-                            ui.horizontal(|ui| {
-                                ui.label("Couleur");
-                                egui::ComboBox::from_id_salt(("mood-color", tab_id, index))
-                                    .selected_text(item.color.to_string())
-                                    .show_ui(ui, |ui| {
-                                        for c in 0..4u8 {
-                                            ui.selectable_value(&mut item.color, c, c.to_string());
-                                        }
-                                    });
-                            });
-                            if let Some(path) = &item.image_path {
-                                if let Ok(bytes) = std::fs::read(path) {
-                                    if let Ok(image) = image::load_from_memory(&bytes) {
-                                        let rgba = image.to_rgba8();
-                                        let color = egui::ColorImage::from_rgba_unmultiplied(
-                                            [rgba.width() as usize, rgba.height() as usize],
-                                            rgba.as_raw(),
-                                        );
-                                        let texture = ctx.load_texture(
-                                            format!("mood-image-{tab_id}-{index}"),
-                                            color,
-                                            egui::TextureOptions::LINEAR,
-                                        );
-                                        ui.image((
-                                            texture.id(),
-                                            egui::vec2(item.width - 20.0, item.height - 65.0)
-                                                .max(egui::vec2(40.0, 40.0)),
-                                        ));
-                                    }
-                                }
-                            }
-                            ui.horizontal(|ui| {
-                                ui.add(egui::DragValue::new(&mut item.width).range(80.0..=1200.0));
-                                ui.add(egui::DragValue::new(&mut item.height).range(60.0..=900.0));
-                            });
-                            ui.add(
-                                egui::TextEdit::multiline(&mut item.text)
-                                    .desired_width(item.width - 20.0)
-                                    .desired_rows(3),
-                            );
-                            ui.text_edit_singleline(item.link.get_or_insert_with(String::new));
-                            if item.link.as_deref() == Some("") {
-                                item.link = None;
-                            }
-                            if let Some(link) = item.link.as_deref() {
-                                ui.hyperlink_to("Ouvrir le lien", link);
-                            }
-                        });
-                });
-            if shown.response.clicked() {
-                clicked_item = Some(index);
-            }
-        }
-        if clicked_item.is_some() {
-            self.selected_mood_item = clicked_item;
-        }
-        if before != serde_json::to_vec(&self.active_tab().mood_items).ok() {
-            self.active_tab_mut().doc.dirty = true;
-            self.session_dirty = true;
-        }
-    }
 
     fn markdown_preview_ui(&mut self, ui: &mut egui::Ui) {
         let blocks = markdown::parse(&self.active_tab().doc.text);
@@ -3103,6 +2993,7 @@ impl eframe::App for NotepadApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         ctx.set_theme(self.theme.preference());
+        ui_design::apply(&ctx);
         if let Some(name) = self.font_family.clone() {
             self.ensure_font(&ctx, &name);
         }
@@ -3149,6 +3040,9 @@ impl eframe::App for NotepadApp {
 
         // Fermeture de la fenetre : demande de confirmation si necessaire.
         if ctx.input(|input| input.viewport().close_requested()) {
+            if self.design.capture.is_some() {
+                return;
+            }
             if self.has_unsaved() && !self.pending_quit {
                 self.pending_quit = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -3159,244 +3053,16 @@ impl eframe::App for NotepadApp {
 
         let mut actions = self.shortcuts(&ctx);
 
-        egui::Panel::top("menu").show(ui, |ui| {
-            self.menu_bar(ui, &mut actions);
-            self.tab_strip(ui, &mut actions);
-            if self.tabs[self.active].doc.markdown && self.show_format_bar {
-                self.format_bar(ui, &mut actions);
-            }
-        });
-
         if self.status_bar {
-            let encoding = self.active_tab().doc.encoding;
-            let eol = self.active_tab().doc.eol;
-            egui::Panel::bottom("status").show(ui, |ui| {
-                let tab = self.active_tab();
-                let (line, column) = line_col(&tab.doc.text, tab.doc.cursor_char);
-                ui.horizontal(|ui| {
-                    ui.label(format!("Ln {line}, Col {column}"));
-                    ui.separator();
-                    let total_chars = tab.doc.text.chars().count();
-                    if tab.doc.selection_chars > 0 {
-                        ui.label(format!(
-                            "{} sur {} caractère(s)",
-                            tab.doc.selection_chars, total_chars
-                        ));
-                    } else {
-                        ui.label(format!("{} caractère(s)", total_chars));
-                    }
-                    ui.separator();
-                    ui.label(if tab.doc.markdown {
-                        "Markdown"
-                    } else {
-                        "Texte brut"
-                    });
-                    ui.separator();
-                    // Comme la barre d'etat du Bloc-notes : codage et fin de
-                    // ligne ouvrent un menu au clic.
-                    ui.menu_button(encoding.label(), |ui| {
-                        for choice in ENCODINGS {
-                            if ui
-                                .selectable_label(choice == encoding, choice.label())
-                                .clicked()
-                            {
-                                actions.push(Action::SetEncoding(choice));
-                                ui.close();
-                            }
-                        }
-                    });
-                    ui.separator();
-                    ui.menu_button(eol.short(), |ui| {
-                        for choice in EOL_ALL {
-                            if ui.selectable_label(choice == eol, choice.label()).clicked() {
-                                actions.push(Action::SetEol(choice));
-                                ui.close();
-                            }
-                        }
-                    });
-                    ui.separator();
-                    ui.label(format!(
-                        "Zoom {} %",
-                        (tab.doc.font_size / 15.0 * 100.0).round() as i32
-                    ));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if !self.status.is_empty() {
-                            ui.add(egui::Label::new(&self.status).truncate());
-                        }
-                    });
-                });
-            });
+            self.status_ui(ui, &mut actions);
         }
 
         let mut typed = false;
-        // Barre laterale de pages, inspirée de Notion : chaque onglet devient une page navigable.
-        let mut page_to_select = None;
-        let mut create_page = false;
-        let mut create_child = false;
-        let mut template: Option<&str> = None;
-        let parents: std::collections::HashMap<u64, Option<u64>> = self
-            .tabs
-            .iter()
-            .map(|tab| (tab.doc.id, tab.page_parent))
-            .collect();
-        let mut renamed_page = false;
-        egui::Panel::left("notion-pages-sidebar")
-            .resizable(true)
-            .default_size(230.0)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("pages-navigation-scroll")
-                    .show(ui, |ui| {
-                        ui.heading("Pages");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.page_search)
-                                .hint_text("Rechercher…"),
-                        );
-                        ui.separator();
-                        if ui.button("+ Nouvelle page").clicked() {
-                            create_page = true;
-                        }
-                        if ui.button("+ Sous-page").clicked() {
-                            create_child = true;
-                        }
-                        ui.menu_button("Nouveau modèle", |ui| {
-                            if ui.button("Notes structurées").clicked() {
-                                template = Some("# Notes\n\n## À retenir\n\n## Actions\n- ");
-                                ui.close();
-                            }
-                            if ui.button("Projet").clicked() {
-                                template = Some("# Projet\n\n## Objectif\n\n## Tâches\n- [ ] ");
-                                ui.close();
-                            }
-                            if ui.button("Réunion").clicked() {
-                                template = Some(
-                                    "# Réunion\n\nDate :\nParticipants :\n\n## Compte rendu\n",
-                                );
-                                ui.close();
-                            }
-                        });
-                        ui.add_space(4.0);
-                        for (index, tab) in self.tabs.iter_mut().enumerate() {
-                            let query = self.page_search.to_lowercase();
-                            if tab.workspace.trashed {
-                                continue;
-                            }
-                            if !query.is_empty()
-                                && !tab.page_title.to_lowercase().contains(&query)
-                                && !tab.doc.title().to_lowercase().contains(&query)
-                                && !tab.doc.text.to_lowercase().contains(&query)
-                            {
-                                continue;
-                            }
-                            let mut depth = 0;
-                            let mut parent = tab.page_parent;
-                            let mut seen = std::collections::HashSet::from([tab.doc.id]);
-                            while let Some(id) = parent {
-                                if !seen.insert(id) || !parents.contains_key(&id) {
-                                    break;
-                                }
-                                depth += 1;
-                                parent = parents[&id];
-                            }
-                            ui.horizontal(|ui| {
-                                ui.add_space(depth as f32 * 18.0);
-                                let icon = if !tab.workspace.icon.is_empty() {
-                                    tab.workspace.icon.as_str()
-                                } else if tab.doc.moodboard {
-                                    "🎨"
-                                } else {
-                                    "📄"
-                                };
-                                let mut title = if tab.page_title.is_empty() {
-                                    tab.doc.title()
-                                } else {
-                                    tab.page_title.clone()
-                                };
-                                let previous_title = title.clone();
-                                let response = ui.add(
-                                    egui::TextEdit::singleline(&mut title)
-                                        .desired_width(150.0)
-                                        .hint_text("Nom de la page"),
-                                );
-                                if response.changed() {
-                                    if !previous_title.is_empty()
-                                        && !tab.workspace.aliases.contains(&previous_title)
-                                    {
-                                        tab.workspace.aliases.push(previous_title);
-                                    }
-                                    tab.page_title = title;
-                                    renamed_page = true;
-                                }
-                                let color = if tab.workspace.color == [0, 0, 0] {
-                                    ui.visuals().text_color()
-                                } else {
-                                    egui::Color32::from_rgb(
-                                        tab.workspace.color[0],
-                                        tab.workspace.color[1],
-                                        tab.workspace.color[2],
-                                    )
-                                };
-                                if ui
-                                    .small_button(egui::RichText::new(icon).color(color))
-                                    .clicked()
-                                {
-                                    page_to_select = Some(index);
-                                }
-                            });
-                        }
-                        ui.separator();
-                        ui.label("Backlinks");
-                        let mut backlink_indices = Vec::new();
-                        for (index, tab) in self.tabs.iter().enumerate() {
-                            if index != self.active
-                                && !tab.workspace.trashed
-                                && wiki_targets(&tab.doc.text).iter().any(|target| {
-                                    resolve_page(&self.tabs, target) == Some(self.active)
-                                })
-                            {
-                                backlink_indices.push(index);
-                            }
-                        }
-                        if backlink_indices.is_empty() {
-                            ui.small("Aucune référence");
-                        }
-                        for index in backlink_indices {
-                            let label = self.tabs[index].page_title.clone();
-                            let label = if label.is_empty() {
-                                self.tabs[index].doc.title()
-                            } else {
-                                label
-                            };
-                            if ui.selectable_label(false, format!("↗ {label}")).clicked() {
-                                page_to_select = Some(index);
-                            }
-                        }
-                    });
-            });
-        self.workspace_tools(ui, &ctx);
-        if renamed_page {
-            self.session_dirty = true;
-        }
-        if create_page {
-            self.new_tab();
-        }
-        if let Some(content) = template {
-            self.new_tab();
-            self.active_tab_mut().doc.text = content.to_string();
-            self.active_tab_mut().doc.markdown = true;
-            self.active_tab_mut().doc.dirty = true;
-            self.session_dirty = true;
-        }
-        if create_child {
-            let parent = self.tabs.get(self.active).map(|tab| tab.doc.id);
-            self.new_tab();
-            self.tabs[self.active].page_parent = parent;
-        }
-        if let Some(index) = page_to_select {
-            self.active = index;
-            self.pending_focus = true;
-        }
+        self.navigation_ui(ui);
+        self.contextual_inspector(ui);
+        self.trash_window(&ctx);
         egui::CentralPanel::default().show(ui, |ui| {
+            self.document_header(ui, &ctx, &mut actions);
             if self.show_print_preview {
                 self.print_preview_ui(ui);
             } else {
@@ -3404,35 +3070,7 @@ impl eframe::App for NotepadApp {
                     self.moodboard_ui(ui, &ctx);
                     return;
                 }
-                if self.tabs[self.active].workspace.visual_blocks {
-                    let id = self.tabs[self.active].doc.id;
-                    if blocks::editor(ui, id, &mut self.tabs[self.active].doc.text) {
-                        self.tabs[self.active].touch();
-                        typed = true;
-                    }
-                    return;
-                }
-                let side_by_side =
-                    self.tabs[self.active].doc.markdown && self.show_markdown_preview;
-                if side_by_side {
-                    let height = ui.available_height();
-                    ui.horizontal_top(|ui| {
-                        let width = (ui.available_width() - 8.0) / 2.0;
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(width, height),
-                            egui::Layout::top_down(egui::Align::Min),
-                            |ui| typed = self.editor_ui(ui, &ctx),
-                        );
-                        ui.separator();
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(width, height),
-                            egui::Layout::top_down(egui::Align::Min),
-                            |ui| self.markdown_preview_ui(ui),
-                        );
-                    });
-                } else {
-                    typed = self.editor_ui(ui, &ctx);
-                }
+                typed = self.document_body(ui, &ctx, &mut actions);
             }
         });
 
@@ -3747,7 +3385,10 @@ impl eframe::App for NotepadApp {
             self.handle_action(&ctx, action);
         }
 
-        self.sync_workspace(&ctx);
+        self.capture_preview(&ctx);
+        if self.design.capture.is_none() {
+            self.sync_workspace(&ctx);
+        }
         if self.close_requested {
             self.close_requested = false;
             self.save_session(&ctx);
@@ -3758,7 +3399,7 @@ impl eframe::App for NotepadApp {
         }
 
         let active = self.active_tab();
-        let name = active.doc.title();
+        let name = ui_design::page_title(active);
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} - Notepad RS")));
     }
 }
@@ -3876,7 +3517,10 @@ mod workspace_tests {
             events,
             ..Default::default()
         };
-        let mut output = ctx.run_ui(input, |ui| app.moodboard_ui(ui, ctx));
+        let mut output = ctx.run_ui(input, |ui| {
+            app.contextual_inspector(ui);
+            app.moodboard_ui(ui, ctx);
+        });
         output.textures_delta.clear();
         output
     }
@@ -3915,7 +3559,7 @@ mod workspace_tests {
         app.new_moodboard();
         mood_frame(&mut app, &ctx, vec![]);
         let output = mood_frame(&mut app, &ctx, vec![]);
-        let header = label_position(&output, "↕ déplacer / sélectionner");
+        let header = label_position(&output, "Déplacer");
         mood_frame(
             &mut app,
             &ctx,
@@ -3945,7 +3589,7 @@ mod workspace_tests {
         mood_frame(&mut app, &ctx, vec![pointer(delete, false)]);
         assert_eq!(app.active_tab().mood_items.len(), 1);
         let output = mood_frame(&mut app, &ctx, vec![]);
-        let header = label_position(&output, "↕ déplacer / sélectionner");
+        let header = label_position(&output, "Déplacer");
         let before = app.active_tab().mood_items[0].x;
         mood_frame(
             &mut app,

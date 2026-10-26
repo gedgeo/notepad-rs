@@ -43,6 +43,9 @@ pub struct Session {
     pub page: PageSetup,
     pub sync_directory: Option<String>,
     pub sync_baseline: Vec<SessionTab>,
+    pub navigation_visible: bool,
+    pub navigation_width: f32,
+    pub interface_scale: f32,
 }
 
 impl Default for Session {
@@ -60,6 +63,9 @@ impl Default for Session {
             page: PageSetup::default(),
             sync_directory: None,
             sync_baseline: Vec::new(),
+            navigation_visible: true,
+            navigation_width: 256.0,
+            interface_scale: 1.25,
         }
     }
 }

@@ -1,2 +1,5 @@
 /target
 **/*.rs.bk
+
+# Intermediate native UI review captures (final captures are versioned).
+/samples/previews/*-v[0-9].png

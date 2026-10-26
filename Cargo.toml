@@ -7,6 +7,7 @@ license = "MIT"
 
 [dependencies]
 eframe = "0.37"
+egui-phosphor = "0.14"
 encoding_rs = "0.8"
 rfd = "0.17"
 chrono = "0.4"
