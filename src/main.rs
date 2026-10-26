@@ -208,6 +208,8 @@ struct Tab {
     history: History,
     max_chars: usize,
     mood_items: Vec<session::MoodItem>,
+    page_parent: Option<u64>,
+    page_title: String,
 }
 
 impl Tab {
@@ -217,6 +219,8 @@ impl Tab {
             history: History::new(""),
             max_chars: 0,
             mood_items: Vec::new(),
+            page_parent: None,
+            page_title: String::new(),
         }
     }
 
@@ -228,6 +232,8 @@ impl Tab {
             doc,
             max_chars,
             mood_items: Vec::new(),
+            page_parent: None,
+            page_title: String::new(),
         })
     }
 
@@ -568,6 +574,8 @@ impl NotepadApp {
                     doc,
                     max_chars,
                     mood_items: Vec::new(),
+            page_parent: None,
+            page_title: String::new(),
                 }
             }
             (None, None) => return None,
