@@ -2569,18 +2569,30 @@ impl eframe::App for NotepadApp {
         // Barre laterale de pages, inspirée de Notion : chaque onglet devient une page navigable.
         let mut page_to_select = None;
         let mut create_page = false;
-        egui::SidePanel::left("notion-pages-sidebar").resizable(true).default_width(210.0).show(ctx, |ui| {
-            ui.heading("Pages");
-            ui.separator();
+        let mut create_child = false;
+        egui::SidePanel::left("notion-pages-sidebar").resizable(true).default_width(230.0).show(ctx, |ui| {
+            ui.heading("Pages"); ui.separator();
             if ui.button("+ Nouvelle page").clicked() { create_page = true; }
+            if ui.button("+ Sous-page").clicked() { create_child = true; }
             ui.add_space(4.0);
-            for (index, tab) in self.tabs.iter().enumerate() {
-                let title = tab.doc.title();
-                let label = if tab.doc.moodboard { format!("🎨 {title}") } else { format!("📄 {title}") };
-                if ui.selectable_label(index == self.active, label).clicked() { page_to_select = Some(index); }
+            for (index, tab) in self.tabs.iter_mut().enumerate() {
+                let depth = tab.page_parent.map(|parent| if self.tabs.iter().any(|t| t.doc.id == parent) { 1 } else { 0 }).unwrap_or(0);
+                ui.horizontal(|ui| {
+                    ui.add_space(depth as f32 * 18.0);
+                    let icon = if tab.doc.moodboard { "🎨" } else { "📄" };
+                    let mut title = if tab.page_title.is_empty() { tab.doc.title() } else { tab.page_title.clone() };
+                    let response = ui.add(egui::TextEdit::singleline(&mut title).desired_width(150.0).hint_text("Nom de la page"));
+                    if response.changed() { tab.page_title = title; self.session_dirty = true; }
+                    if ui.small_button(icon).clicked() { page_to_select = Some(index); }
+                });
             }
         });
-        if create_page { self.new_tab(); self.session_dirty = true; }
+        if create_page { self.new_tab(); }
+        if create_child {
+            let parent = self.tabs.get(self.active).map(|tab| tab.doc.id);
+            self.new_tab();
+            self.tabs[self.active].page_parent = parent;
+        }
         if let Some(index) = page_to_select { self.active = index; self.pending_focus = true; }
         egui::CentralPanel::default().show(ui, |ui| {
             if self.show_print_preview {
