@@ -463,6 +463,7 @@ struct NotepadApp {
     /// Cliquer sur la barre de mise en forme retire la selection du champ de
     /// texte ; on la retrouve ici pour appliquer le style au bon endroit.
     last_selection: Option<(u64, usize, usize)>,
+    selected_mood_item: Option<usize>,
 }
 
 impl NotepadApp {
@@ -1111,50 +1112,24 @@ impl NotepadApp {
 
     /// Apercu Markdown de l'onglet actif, cote a cote avec l'editeur.
     fn moodboard_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let mut remove = None; let mut duplicate = None; let mut export = false;
         ui.horizontal(|ui| {
-            ui.label("Moodboard");
-            if ui.button("+ Note").clicked() {
-                let tab = self.active_tab_mut();
-                let n = tab.mood_items.len() as f32;
-                tab.mood_items.push(session::MoodItem { text: "Nouvelle note".into(), image_path: None, x: 40.0 + n * 24.0, y: 40.0 + n * 24.0, width: 190.0, height: 130.0, color: (n as u8) % 4 });
-                tab.doc.dirty = true;
-                self.session_dirty = true;
-            }
+            ui.heading("Moodboard");
+            if ui.button("+ Note").clicked() { let n=self.active_tab().mood_items.len() as f32; self.active_tab_mut().mood_items.push(session::MoodItem{text:"Nouvelle note".into(),image_path:None,x:40.0+n*24.0,y:40.0+n*24.0,width:190.0,height:130.0,color:(n as u8)%4,link:None}); self.selected_mood_item=Some(self.active_tab().mood_items.len()-1); }
+            if ui.button("Supprimer").clicked(){remove=self.selected_mood_item;} if ui.button("Dupliquer").clicked(){duplicate=self.selected_mood_item;} if ui.button("Exporter").clicked(){export=true;}
         });
-        let (response, _) = ui.allocate_painter(ui.available_size(), egui::Sense::hover());
-        let tab_id = self.active_tab().doc.id;
-        let tab = self.active_tab_mut();
-        for (index, item) in tab.mood_items.iter_mut().enumerate() {
-            let id = egui::Id::unique(("mood-item", tab_id, index));
-            egui::Area::new(id).fixed_pos(response.rect.min + egui::vec2(item.x, item.y)).movable(true).show(ctx, |ui| {
-                let fill = match item.color { 1 => egui::Color32::from_rgb(220, 240, 180), 2 => egui::Color32::from_rgb(190, 225, 250), 3 => egui::Color32::from_rgb(245, 205, 220), _ => egui::Color32::from_rgb(250, 235, 160) };
-                egui::Frame::NONE.fill(fill).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
-                    if let Some(path) = &item.image_path {
-                        let filename = std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy();
-                        ui.label(format!("Image : {filename}"));
-                        if let Ok(bytes) = std::fs::read(path) {
-                            if let Ok(image) = image::load_from_memory(&bytes) {
-                                let rgba = image.to_rgba8();
-                                let size = [rgba.width() as usize, rgba.height() as usize];
-                                let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-                                let texture = ctx.load_texture(format!("mood-image-{tab_id}-{index}"), color, egui::TextureOptions::LINEAR);
-                                ui.image((texture.id(), egui::vec2(item.width - 20.0, item.height - 55.0).max(egui::vec2(40.0, 40.0))));
-                            } else {
-                                ui.label("Format d’image illisible");
-                            }
-                        } else {
-                            ui.label("Image introuvable");
-                        }
-                    }
-                    ui.horizontal(|ui| {
-                        ui.label("Taille");
-                        ui.add(egui::DragValue::new(&mut item.width).range(80.0..=1200.0).speed(1.0));
-                        ui.add(egui::DragValue::new(&mut item.height).range(60.0..=900.0).speed(1.0));
-                    });
-                    ui.add(egui::TextEdit::multiline(&mut item.text).desired_width(item.width - 20.0).desired_rows(4));
-                });
-            });
-        }
+        if export { let path=std::env::current_dir().unwrap_or_default().join("moodboard_export.json"); if let Ok(data)=serde_json::to_vec_pretty(&self.active_tab().mood_items){if std::fs::write(&path,data).is_ok(){self.status=format!("Moodboard exporté : {}",path.display());}}}
+        if let Some(i)=remove {if i<self.active_tab().mood_items.len(){self.active_tab_mut().mood_items.remove(i);self.selected_mood_item=None;self.active_tab_mut().doc.dirty=true;self.session_dirty=true;}}
+        if let Some(i)=duplicate {if let Some(mut item)=self.active_tab().mood_items.get(i).cloned(){item.x+=24.0;item.y+=24.0;self.active_tab_mut().mood_items.push(item);self.selected_mood_item=Some(self.active_tab().mood_items.len()-1);self.active_tab_mut().doc.dirty=true;self.session_dirty=true;}}
+        let (response, _)=ui.allocate_painter(ui.available_size(),egui::Sense::hover()); let tab_id=self.active_tab().doc.id; let selected=self.selected_mood_item; let tab=self.active_tab_mut();
+        for (index,item) in tab.mood_items.iter_mut().enumerate(){let id=egui::Id::new(("mood-item",tab_id,index));let shown=egui::Area::new(id).fixed_pos(response.rect.min+egui::vec2(item.x,item.y)).show(ctx,|ui|{
+            let fill=match item.color{1=>egui::Color32::from_rgb(220,240,180),2=>egui::Color32::from_rgb(190,225,250),3=>egui::Color32::from_rgb(245,205,220),_=>egui::Color32::from_rgb(250,235,160)};let stroke=if selected==Some(index){egui::Stroke::new(3.0,egui::Color32::from_rgb(40,100,220))}else{egui::Stroke::NONE};
+            egui::Frame::NONE.fill(fill).stroke(stroke).inner_margin(egui::Margin::same(10)).show(ui,|ui|{
+                let drag=ui.allocate_response(egui::vec2(ui.available_width(),18.0),egui::Sense::drag());ui.label("↕ déplacer");if drag.dragged(){item.x+=drag.drag_delta().x;item.y+=drag.drag_delta().y;}
+                ui.horizontal(|ui|{ui.label("Couleur");egui::ComboBox::from_id_salt(("mood-color",tab_id,index)).selected_text(item.color.to_string()).show_ui(ui,|ui|{for c in 0..4u8{ui.selectable_value(&mut item.color,c,c.to_string());}});});
+                if let Some(path)=&item.image_path{if let Ok(bytes)=std::fs::read(path){if let Ok(image)=image::load_from_memory(&bytes){let rgba=image.to_rgba8();let color=egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize,rgba.height() as usize],rgba.as_raw());let texture=ctx.load_texture(format!("mood-image-{tab_id}-{index}"),color,egui::TextureOptions::LINEAR);ui.image((texture.id(),egui::vec2(item.width-20.0,item.height-65.0).max(egui::vec2(40.0,40.0))));}}}
+                ui.horizontal(|ui|{ui.add(egui::DragValue::new(&mut item.width).range(80.0..=1200.0));ui.add(egui::DragValue::new(&mut item.height).range(60.0..=900.0));});ui.add(egui::TextEdit::multiline(&mut item.text).desired_width(item.width-20.0).desired_rows(3));ui.text_edit_singleline(item.link.get_or_insert_with(String::new));if item.link.as_deref()==Some(""){item.link=None;}if let Some(link)=item.link.as_deref(){ui.hyperlink_to("Ouvrir le lien",link);}
+            });});if shown.response.clicked(){self.selected_mood_item=Some(index);}}
     }
 
     fn markdown_preview_ui(&mut self, ui: &mut egui::Ui) {
