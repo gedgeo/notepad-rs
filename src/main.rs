@@ -2686,7 +2686,7 @@ impl NotepadApp {
                     ui.close();
                 }
             });
-            ui.menu_button("Edition", |ui| {
+            ui.menu_button("Édition", |ui| {
                 if ui.button("Annuler          Ctrl+Z").clicked() {
                     actions.push(Action::Undo);
                     ui.close();
@@ -2813,6 +2813,7 @@ impl NotepadApp {
                     ui.close();
                 }
             });
+            self.workspace_menu_items(ui, actions);
         });
     }
 
@@ -3056,6 +3057,7 @@ impl eframe::App for NotepadApp {
         }
 
         let mut actions = self.shortcuts(&ctx);
+        self.horizontal_menu_ui(ui, &mut actions);
 
         if self.status_bar {
             self.status_ui(ui, &mut actions);

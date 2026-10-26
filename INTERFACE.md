@@ -11,12 +11,13 @@ La refonte reprend les trois vues validées : écriture, blocs et moodboard. L'a
 - L'inspecteur s'ouvre pour le bloc ou l'élément de moodboard sélectionné. Il permet de régler les dimensions, couleur des notes, lien, duplication, suppression et ordre avant/arrière.
 - Dans le moodboard, le pointeur déplace les éléments, la main déplace le fond. Les commandes de zoom et d'ajustement se trouvent au bas du canevas. La poignée du coin inférieur droit redimensionne l'élément sélectionné.
 - Exporter propose les formats adaptés : Markdown/HTML/PDF pour une page et JSON avec images embarquées pour un moodboard.
-- Le menu « … » conserve Fichier, Édition, Affichage et Aide, les onglets ouverts, les propriétés, l'historique et l'échelle de l'interface.
+- Une barre horizontale permanente occupe le haut de la fenêtre : Fichier, Édition, Affichage, Aide, Onglets, Page, Espace et Interface. Page ouvre les propriétés et le renommage ; Espace ouvre l'historique et les paramètres ; Interface règle l'échelle et la navigation. Le menu « … » de l'en-tête a été retiré.
+- En petite fenêtre, Fichier, Édition, Affichage et Aide restent visibles ; les entrées supplémentaires sont regroupées dans Outils. Un défilement horizontal préserve l'accès aux menus si la fenêtre est très étroite.
 - Les commandes avancées de sauvegarde et synchronisation restent dans Paramètres. Les informations d'encodage, fins de ligne, curseur et sélection sont accessibles par Détails dans la barre d'état.
 
 ## Échelle et thèmes
 
-L'échelle par défaut est de 125 %, avec choix 100/125/150 % dans le menu du document. Elle est enregistrée avec la visibilité et la largeur de navigation. Le mode clair est utilisé pour une nouvelle session ; les préférences de thème des sessions existantes sont conservées.
+L'échelle par défaut est de 125 %, avec choix 100/125/150 % dans le menu Interface. Elle est enregistrée avec la visibilité et la largeur de navigation. Le mode clair est utilisé pour une nouvelle session ; les préférences de thème des sessions existantes sont conservées.
 
 Les titres utilisent Segoe UI Bold quand elle est disponible et les icônes viennent de Phosphor, distribué sous licence MIT. Les polices Windows sont chargées depuis leur installation locale, sans être redistribuées.
 

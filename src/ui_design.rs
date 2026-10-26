@@ -118,6 +118,69 @@ pub fn page_title(tab: &Tab) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn main_menus_are_visible_on_one_row_and_page_properties_still_open() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = NotepadApp::new(&cc, None, PathBuf::from("unused-menu-session.json"));
+        app.setup_preview("notes", "unused-menu-capture.png");
+        let _ = shell(&mut app, &ctx, 1440.0, vec![]);
+        let output = shell(&mut app, &ctx, 1440.0, vec![]);
+        let locate = |out: &egui::FullOutput, label: &str| {
+            out.shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text() == label => {
+                        Some(t.pos + egui::vec2(6.0, 6.0))
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("Menu absent : {label}"))
+        };
+        let first = locate(&output, "Fichier");
+        for label in [
+            "Édition",
+            "Affichage",
+            "Aide",
+            "Onglets",
+            "Page",
+            "Espace",
+            "Interface",
+        ] {
+            let p = locate(&output, label);
+            assert!(
+                (p.y - first.y).abs() < 3.0,
+                "{label} n’est pas sur la même ligne"
+            );
+        }
+        let page = locate(&output, "Page");
+        let click = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        shell(
+            &mut app,
+            &ctx,
+            1440.0,
+            vec![egui::Event::PointerMoved(page), click(page, true)],
+        );
+        shell(&mut app, &ctx, 1440.0, vec![click(page, false)]);
+        let output = shell(&mut app, &ctx, 1440.0, vec![]);
+        let properties = locate(&output, "Propriétés de la page");
+        shell(
+            &mut app,
+            &ctx,
+            1440.0,
+            vec![
+                egui::Event::PointerMoved(properties),
+                click(properties, true),
+            ],
+        );
+        shell(&mut app, &ctx, 1440.0, vec![click(properties, false)]);
+        assert!(app.design.inspector);
+    }
     fn shell(
         app: &mut NotepadApp,
         ctx: &egui::Context,
@@ -271,6 +334,95 @@ pub fn tree_order(tabs: &[Tab]) -> Vec<(usize, usize)> {
 }
 
 impl NotepadApp {
+    pub(crate) fn horizontal_menu_ui(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        egui::Panel::top("horizontal-main-menu")
+            .frame(
+                egui::Frame::NONE
+                    .fill(ui.visuals().panel_fill)
+                    .inner_margin(egui::Margin::symmetric(12, 4)),
+            )
+            .show(ui, |ui| {
+                egui::ScrollArea::horizontal()
+                    .id_salt("main-menu-scroll")
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| self.menu_bar(ui, actions));
+            });
+    }
+
+    pub(crate) fn workspace_menu_items(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let ctx = ui.ctx().clone();
+        ui.separator();
+        if ctx.content_rect().width() < 760.0 {
+            ui.menu_button("Outils", |ui| {
+                self.page_menu_items(ui);
+                ui.separator();
+                ui.menu_button("Onglets ouverts", |ui| self.tab_strip(ui, actions));
+                if ui.button("Historique et paramètres…").clicked() {
+                    self.design.settings = true;
+                    ui.close();
+                }
+                ui.menu_button("Interface", |ui| self.interface_menu_items(ui, &ctx));
+            });
+        } else {
+            ui.menu_button("Onglets", |ui| self.tab_strip(ui, actions));
+            ui.menu_button("Page", |ui| self.page_menu_items(ui));
+            ui.menu_button("Espace", |ui| {
+                if ui.button("Historique et paramètres…").clicked() {
+                    self.design.settings = true;
+                    ui.close();
+                }
+                if ui.button("Corbeille").clicked() {
+                    self.design.trash = true;
+                    ui.close();
+                }
+            });
+            ui.menu_button("Interface", |ui| self.interface_menu_items(ui, &ctx));
+        }
+    }
+
+    fn page_menu_items(&mut self, ui: &mut egui::Ui) {
+        if ui.button("Propriétés de la page").clicked() {
+            self.design.inspector = !self.design.inspector;
+            ui.close();
+        }
+        if ui.button("Renommer la page").clicked() {
+            self.design.rename = Some(self.active_tab().doc.id);
+            self.design.rename_draft = page_title(self.active_tab());
+            self.design.sidebar = true;
+            self.design.mobile_navigation = true;
+            ui.close();
+        }
+        let mut favorite = self.active_tab().workspace.favorite;
+        if ui.checkbox(&mut favorite, "Ajouter aux favoris").changed() {
+            self.active_tab_mut().workspace.favorite = favorite;
+            self.session_dirty = true;
+        }
+    }
+
+    fn interface_menu_items(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if ui
+            .checkbox(&mut self.design.sidebar, "Navigation des pages")
+            .changed()
+        {
+            self.session_dirty = true;
+        }
+        ui.separator();
+        ui.label("Échelle de l’interface");
+        for scale in [1.0, 1.25, 1.5] {
+            if ui
+                .selectable_label(
+                    (ctx.zoom_factor() - scale).abs() < 0.01,
+                    format!("{:.0} %", scale * 100.0),
+                )
+                .clicked()
+            {
+                ctx.set_zoom_factor(scale);
+                self.session_dirty = true;
+                ui.close();
+            }
+        }
+    }
+
     pub(crate) fn status_ui(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         egui::Panel::bottom("workspace-status")
             .frame(
@@ -596,7 +748,8 @@ impl NotepadApp {
                         } else {
                             ui.set_min_height((size.y - 24.0).max(40.0));
                             let drag = ui.add(
-                                egui::Label::new("Déplacer").sense(egui::Sense::click_and_drag()),
+                                egui::Label::new(egui::RichText::new("Déplacer").color(INK))
+                                    .sense(egui::Sense::click_and_drag()),
                             );
                             ui.add(
                                 egui::TextEdit::multiline(&mut item.text)
@@ -778,16 +931,18 @@ impl NotepadApp {
                 ..Default::default()
             });
         }
-        self.active = match mode {
-            "blocks" => 2,
-            "moodboard" => 4,
-            _ => 1,
+        self.active = if mode.starts_with("blocks") {
+            2
+        } else if mode.starts_with("moodboard") {
+            4
+        } else {
+            1
         };
-        if mode == "blocks" {
+        if mode.starts_with("blocks") {
             self.design.selected_block = Some(1);
             self.design.inspector = true;
         }
-        if mode == "moodboard" {
+        if mode.starts_with("moodboard") {
             self.selected_mood_tab = Some(self.active_tab().doc.id);
             self.selected_mood_item = Some(0);
             self.design.board_zoom = 0.8;
@@ -1111,7 +1266,7 @@ impl NotepadApp {
         &mut self,
         ui: &mut egui::Ui,
         ctx: &egui::Context,
-        actions: &mut Vec<Action>,
+        _actions: &mut Vec<Action>,
     ) {
         ui.horizontal_wrapped(|ui| {
             if ui
@@ -1140,28 +1295,6 @@ impl NotepadApp {
                 ui.add(egui::Label::new(page_title(self.active_tab())).truncate());
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.menu_button(icons::DOTS_THREE, |ui| {
-                    self.menu_bar(ui, actions);
-                    ui.separator();
-                    ui.collapsing("Onglets ouverts", |ui| self.tab_strip(ui, actions));
-                    if ui.button("Propriétés de la page").clicked() {
-                        self.design.inspector = !self.design.inspector;
-                        ui.close();
-                    }
-                    if ui.button("Historique et paramètres…").clicked() {
-                        self.design.settings = true;
-                        ui.close();
-                    }
-                    ui.menu_button("Échelle de l’interface", |ui| {
-                        for scale in [1.0, 1.25, 1.5] {
-                            if ui.button(format!("{:.0} %", scale * 100.0)).clicked() {
-                                ctx.set_zoom_factor(scale);
-                                self.session_dirty = true;
-                                ui.close();
-                            }
-                        }
-                    });
-                });
                 ui.menu_button(format!("{} Exporter", icons::EXPORT), |ui| {
                     let formats: &[&str] = if self.active_tab().doc.moodboard {
                         &["json"]

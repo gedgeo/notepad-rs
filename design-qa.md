@@ -2,6 +2,14 @@
 
 final result: passed
 
+### Ajustement utilisateur : menu horizontal
+
+À la demande de l'utilisateur, les commandes auparavant regroupées dans le menu « … » sont exposées dans une barre horizontale sur toute la largeur. Cette demande remplace le traitement du menu global des maquettes initiales, sans modifier la structure du document ou du canevas.
+
+- Captures natives : `samples/previews/notes-horizontal.png`, `moodboard-horizontal-dark.png` et `menu-horizontal-narrow.png`.
+- Vérifications : ligne des menus visible, catégories sur une même ligne, propriétés toujours accessibles, thème sombre et petite fenêtre. Sur écran étroit, les fonctions supplémentaires passent dans Outils ; les quatre menus principaux restent exposés.
+- 95 tests réussis, dont un test d'alignement de toutes les catégories et d'ouverture des propriétés depuis Page. Compilation réussie sans fermer la fenêtre utilisateur ; l'ancien exécutable a été conservé sous un nom de sauvegarde dans `target` afin de permettre son remplacement.
+
 ### Régression native corrigée après publication
 
 Le lancement utilisateur a révélé un verrou réentrant dans la sauvegarde de géométrie : `Context::input` contenait un appel à `Context::zoom_factor`. Les captures de démonstration ne sauvegardent pas et les anciens tests n'injectaient pas de `ViewportInfo::inner_rect`, ce qui avait masqué ce chemin. Le facteur d'échelle est désormais lu avant d'entrer dans la fermeture de lecture. Un test supplémentaire injecte une géométrie native, sauvegarde la session et vérifie sa taille et le texte restauré. Résultat : 94 tests réussis et compilation réussie. Les captures de disposition restent inchangées.
