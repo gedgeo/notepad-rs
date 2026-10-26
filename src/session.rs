@@ -80,6 +80,11 @@ pub struct SessionTab {
     pub markdown: bool,
     pub moodboard: bool,
     pub mood_items: Vec<MoodItem>,
+    /// Identifiant stable de page et identifiant de la page parente.
+    #[serde(default)]
+    pub page_id: u64,
+    #[serde(default)]
+    pub parent_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,6 +218,8 @@ mod tests {
             markdown: true,
             moodboard: false,
             mood_items: Vec::new(),
+            page_id: 1,
+            parent_id: None,
         });
         session.tabs.push(SessionTab {
             path: None,
