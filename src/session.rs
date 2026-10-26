@@ -92,10 +92,12 @@ pub struct MoodItem {
     pub width: f32,
     pub height: f32,
     pub color: u8,
+    #[serde(default)]
+    pub link: Option<String>,
 }
 
 impl Default for MoodItem {
-    fn default() -> Self { Self { text: "Note".into(), image_path: None, x: 80.0, y: 80.0, width: 190.0, height: 130.0, color: 0 } }
+    fn default() -> Self { Self { text: "Note".into(), image_path: None, x: 80.0, y: 80.0, width: 190.0, height: 130.0, color: 0, link: None } }
 }
 
 pub fn encoding_code(encoding: Encoding) -> u8 {
