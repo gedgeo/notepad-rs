@@ -296,3 +296,5 @@ cargo build --release
 Code original sous MIT. Les noms de valeurs de registre, chaînes et noms de
 fonctions cités proviennent de l'analyse du binaire public de Windows et
 servent uniquement de documentation comportementale.
+
+La chaîne Rust du projet est définie dans `rust-toolchain.toml` : `stable-x86_64-pc-windows-gnu`. Cette configuration est conservée après un déplacement du dossier et évite de reprendre la chaîne MSVC par défaut (qui exige `link.exe`). Si nécessaire, installez-la avec `rustup toolchain install stable-x86_64-pc-windows-gnu`. Utilisez ensuite `build.ps1` pour sélectionner également WinLibs.
