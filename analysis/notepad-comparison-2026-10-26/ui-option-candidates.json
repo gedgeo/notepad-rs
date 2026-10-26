@@ -1,0 +1,392 @@
+[
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446336,
+    "value": "MenuItemEditUndo"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446472,
+    "value": "MenuItemRemoveLink"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446512,
+    "value": "MenuItemRewrite"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446544,
+    "value": "MenuItemEditLink"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446584,
+    "value": "MenuItemCustomRewrite"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446632,
+    "value": "MenuItemMakeShorter"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446672,
+    "value": "MenuItemSummarize"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446712,
+    "value": "MenuItemGenerate"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446752,
+    "value": "MenuItemFormalTone"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446792,
+    "value": "MenuItemMakeLonger"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446832,
+    "value": "MenuItemChangeTone"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446872,
+    "value": "MenuItemHumorTone"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446912,
+    "value": "MenuItemPersuasiveTone"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2446960,
+    "value": "MenuItemCasualTone"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2447000,
+    "value": "MenuItemInspirationalTone"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2447056,
+    "value": "MenuItemParagraphFormat"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2447104,
+    "value": "MenuItemListFormat"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2447144,
+    "value": "MenuItemChangeFormat"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2447192,
+    "value": "MenuItemMarketingFormat"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2447240,
+    "value": "MenuItemPoetryFormat"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2447288,
+    "value": "MenuItemBusinessFormat"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2447336,
+    "value": "MenuItemAcademicFormat"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2473904,
+    "value": "MenuItemInlineIntermediatePadding"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2473976,
+    "value": "MenuItemInlineWidePadding"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2474032,
+    "value": "MenuItemWrapMargin"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2474072,
+    "value": "MenuItemWrapRowSpacing"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501016,
+    "value": "MenuItemFileOpen"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501056,
+    "value": "MenuItemFileRecent"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501096,
+    "value": "MenuItemFileClearRecent"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501144,
+    "value": "MenuItemFileNoRecentFiles"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501224,
+    "value": "MenuItemFileNewTab"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501264,
+    "value": "MenuItemFileNewWindow"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501312,
+    "value": "MenuItemFileNewMarkdownTab"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501368,
+    "value": "MenuItemFilePrint"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501408,
+    "value": "MenuItemFileCloseTab"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501456,
+    "value": "MenuItemFileCloseWindow"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501504,
+    "value": "MenuItemFileExit"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501544,
+    "value": "MenuItemFileSave"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501584,
+    "value": "MenuItemFileSaveAs"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501624,
+    "value": "MenuItemFileSaveAll"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501664,
+    "value": "MenuItemFilePageSetup"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501712,
+    "value": "MenuItemEditDelete"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501752,
+    "value": "MenuItemEditFind"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501792,
+    "value": "MenuItemEditFindNext"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501840,
+    "value": "MenuItemEditFindPrevious"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501920,
+    "value": "MenuItemEditCut"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501952,
+    "value": "MenuItemEditCopy"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2501992,
+    "value": "MenuItemEditPaste"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502032,
+    "value": "MenuItemClearFormatting"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502080,
+    "value": "MenuItemFormatWordWrap"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502128,
+    "value": "MenuItemFormatFont"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502168,
+    "value": "MenuItemTextViews"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502208,
+    "value": "MenuItemEditReplace"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502248,
+    "value": "MenuItemEditGoTo"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502288,
+    "value": "MenuItemEditSelectAll"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502336,
+    "value": "MenuItemEditTimeAndDate"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502384,
+    "value": "MenuItemZoomIn"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502416,
+    "value": "MenuItemZoomOut"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502448,
+    "value": "MenuItemZoomRestore"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502488,
+    "value": "MenuItemViewStatusBar"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502536,
+    "value": "MenuItemTextViewFormatted"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2502592,
+    "value": "MenuItemTextViewSyntax"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2536024,
+    "value": "TabViewItemCloseTooltip"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2557968,
+    "value": "SettingFontSampleText"
+  },
+  {
+    "file": "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2606.15.0_x64__8wekyb3d8bbwe\\Notepad\\NotepadXamlUI.dll",
+    "encoding": "Unicode",
+    "offset": 2587856,
+    "value": "Settings"
+  }
+]

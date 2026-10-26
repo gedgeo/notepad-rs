@@ -1,0 +1,7 @@
+[build]
+target = "x86_64-pc-windows-gnu"
+
+# Linker WinLibs (GCC 16.2, UCRT) installe par winget. Le GCC 6.3 de
+# C:\MinGW est trop ancien et masque WinLibs dans le PATH.
+[target.x86_64-pc-windows-gnu]
+linker = "C:\\Users\\Gedge\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\gcc.exe"
