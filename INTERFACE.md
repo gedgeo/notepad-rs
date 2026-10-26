@@ -17,7 +17,7 @@ La refonte reprend les trois vues validées : écriture, blocs et moodboard. L'a
 
 ## Échelle et thèmes
 
-L'échelle par défaut est de 125 %, avec choix 100/125/150 % dans le menu Interface. Elle est enregistrée avec la visibilité et la largeur de navigation. Le mode clair est utilisé pour une nouvelle session ; les préférences de thème des sessions existantes sont conservées.
+L'échelle par défaut est de 100 %, avec choix 100/125/150 % dans le menu Interface. Les anciennes sessions restées sur le réglage initial de 125 % migrent une fois à 100 %. Les choix suivants sont conservés avec la visibilité et la largeur de navigation. Le mode clair est utilisé pour une nouvelle session ; les préférences de thème des sessions existantes sont conservées.
 
 Les titres utilisent Segoe UI Bold quand elle est disponible et les icônes viennent de Phosphor, distribué sous licence MIT. Les polices Windows sont chargées depuis leur installation locale, sans être redistribuées.
 

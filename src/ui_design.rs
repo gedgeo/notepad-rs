@@ -56,13 +56,13 @@ impl Default for State {
 
 pub fn apply(ctx: &egui::Context) {
     ctx.global_style_mut(|style| {
-        style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-        style.spacing.button_padding = egui::vec2(12.0, 7.0);
-        style.spacing.interact_size.y = 34.0;
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.button_padding = egui::vec2(10.0, 5.0);
+        style.spacing.interact_size.y = 30.0;
         style.spacing.window_margin = egui::Margin::same(16);
         style
             .text_styles
-            .insert(egui::TextStyle::Body, egui::FontId::proportional(16.0));
+            .insert(egui::TextStyle::Body, egui::FontId::proportional(15.0));
         style
             .text_styles
             .insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
@@ -71,7 +71,7 @@ pub fn apply(ctx: &egui::Context) {
             .insert(egui::TextStyle::Small, egui::FontId::proportional(13.0));
         style.text_styles.insert(
             egui::TextStyle::Heading,
-            egui::FontId::new(32.0, egui::FontFamily::Name(DEFAULT_BOLD_FAMILY.into())),
+            egui::FontId::new(20.0, egui::FontFamily::Name(DEFAULT_BOLD_FAMILY.into())),
         );
         style.visuals.selection.bg_fill = if style.visuals.dark_mode {
             egui::Color32::from_rgb(27, 47, 78)
@@ -933,7 +933,7 @@ impl NotepadApp {
         }
         self.active = if mode.starts_with("blocks") {
             2
-        } else if mode.starts_with("moodboard") {
+        } else if mode.starts_with("moodboard") || mode.starts_with("close-dialog") {
             4
         } else {
             1
@@ -949,6 +949,10 @@ impl NotepadApp {
         }
         for tab in &mut self.tabs {
             tab.doc.dirty = false;
+        }
+        if mode.starts_with("close-dialog") {
+            self.active_tab_mut().doc.dirty = true;
+            self.pending_quit = true;
         }
         self.design.capture = Some((path.into(), mode.into(), 0));
         self.session_dirty = false;

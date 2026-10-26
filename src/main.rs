@@ -10,6 +10,7 @@
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
 mod blocks;
+mod close_dialogs;
 mod doc;
 mod encoding;
 mod find;
@@ -26,6 +27,7 @@ mod workspace_io;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use close_dialogs::tab_snapshot;
 use doc::{char_index_of_line, line_col, Doc, Eol, EOL_ALL};
 use eframe::egui;
 use encoding::{Encoding, ALL as ENCODINGS};
@@ -479,6 +481,9 @@ struct NotepadApp {
     loaded_fonts: std::collections::HashSet<String>,
     pending_quit: bool,
     close_requested: bool,
+    close_confirmed: bool,
+    quit_save_pending: bool,
+    quit_all_windows: bool,
     /// Identifiants des documents en attente de confirmation de fermeture.
     pending_close: Vec<u64>,
     /// Confirmation avant une conversion ANSI avec perte.
@@ -918,7 +923,7 @@ impl NotepadApp {
         session_file: PathBuf,
     ) -> NotepadApp {
         cc.egui_ctx.set_theme(egui::ThemePreference::System);
-        cc.egui_ctx.set_zoom_factor(1.25);
+        cc.egui_ctx.set_zoom_factor(1.0);
         let mut fonts = egui::FontDefinitions::default();
         fonts.font_data.insert(
             "phosphor".into(),
@@ -958,6 +963,9 @@ impl NotepadApp {
             loaded_fonts: std::collections::HashSet::new(),
             pending_quit: false,
             close_requested: false,
+            close_confirmed: false,
+            quit_save_pending: false,
+            quit_all_windows: false,
             pending_close: Vec::new(),
             pending_ansi_save: None,
             session_file,
@@ -988,8 +996,14 @@ impl NotepadApp {
             selected_mood_tab: None,
         };
         if let Some(session) = session {
-            cc.egui_ctx
-                .set_zoom_factor(session.interface_scale.clamp(0.8, 1.75));
+            let scale = if session.ui_density_version == 0
+                && (session.interface_scale - 1.25).abs() < 0.01
+            {
+                1.0
+            } else {
+                session.interface_scale
+            };
+            cc.egui_ctx.set_zoom_factor(scale.clamp(0.8, 1.75));
             app.design.sidebar = session.navigation_visible;
             app.design.sidebar_width = session.navigation_width.clamp(190.0, 340.0);
             app.sync_directory = session.sync_directory.clone();
@@ -1180,6 +1194,28 @@ impl NotepadApp {
             self.next_id += 1;
             id
         };
+        if let Ok(mut saved) = serde_json::from_slice::<session::SessionTab>(&bytes) {
+            if saved.moodboard {
+                saved.page_id = id;
+                saved.path = Some(path.to_string_lossy().into_owned());
+                saved.dirty = false;
+                if saved.text.is_none() {
+                    saved.text = Some(String::new());
+                }
+                if let Some(tab) = self.restore_tab(saved) {
+                    if reuse {
+                        self.tabs[self.active] = tab;
+                    } else {
+                        self.tabs.push(tab);
+                        self.active = self.tabs.len() - 1;
+                    }
+                    self.remember_recent(&path);
+                    self.session_dirty = true;
+                    self.status = format!("Moodboard ouvert : {}", path.display());
+                }
+                return;
+            }
+        }
         match Tab::open(id, path.clone(), bytes) {
             Ok(mut tab) => {
                 tab.doc.wrap = self.default_wrap;
@@ -1207,16 +1243,24 @@ impl NotepadApp {
     fn save_active(&mut self, save_as: bool) {
         let tab = self.active_tab_mut();
         let target = if save_as || tab.doc.path.is_none() {
-            rfd::FileDialog::new()
-                .set_title("Enregistrer sous")
-                .add_filter("Documents texte", &["txt", "log", "md", "csv", "json"])
-                .add_filter("Tous les fichiers", &["*"])
-                .save_file()
+            if tab.doc.moodboard {
+                rfd::FileDialog::new()
+                    .set_title("Enregistrer le moodboard")
+                    .set_file_name("Moodboard.json")
+                    .add_filter("Moodboard Notepad RS", &["json"])
+                    .save_file()
+            } else {
+                rfd::FileDialog::new()
+                    .set_title("Enregistrer sous")
+                    .add_filter("Documents texte", &["txt", "log", "md", "csv", "json"])
+                    .add_filter("Tous les fichiers", &["*"])
+                    .save_file()
+            }
         } else {
             tab.doc.path.clone()
         };
         let Some(path) = target else { return };
-        if tab.doc.encoding.loses_information(&tab.doc.text) {
+        if !tab.doc.moodboard && tab.doc.encoding.loses_information(&tab.doc.text) {
             self.pending_ansi_save = Some(path);
             return;
         }
@@ -1224,6 +1268,29 @@ impl NotepadApp {
     }
 
     fn write_active_to(&mut self, path: PathBuf) {
+        if self.active_tab().doc.moodboard {
+            let mut page = tab_snapshot(self.active_tab());
+            page.path = Some(path.to_string_lossy().into_owned());
+            page.dirty = false;
+            let snapshot = Session {
+                tabs: vec![page],
+                ..Default::default()
+            };
+            let result = workspace_io::portable(snapshot)
+                .and_then(|s| serde_json::to_vec_pretty(&s.tabs[0]).map_err(std::io::Error::other))
+                .and_then(|data| std::fs::write(&path, data));
+            match result {
+                Ok(()) => {
+                    let tab = self.active_tab_mut();
+                    tab.doc.path = Some(path.clone());
+                    tab.doc.dirty = false;
+                    self.status = format!("Moodboard enregistré : {}", path.display());
+                    self.remember_recent(&path);
+                }
+                Err(error) => self.status = format!("Enregistrement impossible : {error}"),
+            }
+            return;
+        }
         let tab = self.active_tab_mut();
         let bytes = tab.doc.bytes_for_save();
         match std::fs::write(&path, bytes) {
@@ -1311,6 +1378,11 @@ impl NotepadApp {
             }
             self.active = index;
             self.save_active(false);
+            if self.pending_ansi_save.is_some() {
+                self.status =
+                    "Confirmation ANSI requise avant de poursuivre l’enregistrement".into();
+                return;
+            }
             if self.tabs[index].doc.dirty {
                 pending += 1;
             } else {
@@ -1442,31 +1514,7 @@ impl NotepadApp {
     /// Etat a persister : onglets (texte autosauvegarde si modifie),
     /// preferences d'affichage, geometrie et fichiers recents.
     fn session_snapshot(&self, ctx: &egui::Context) -> Session {
-        let tabs = self
-            .tabs
-            .iter()
-            .map(|tab| session::SessionTab {
-                path: tab
-                    .doc
-                    .path
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().to_string()),
-                text: Some(tab.doc.text.clone()),
-                encoding: session::encoding_code(tab.doc.encoding),
-                eol: session::eol_code(tab.doc.eol),
-                wrap: tab.doc.wrap,
-                font_size: tab.doc.font_size,
-                cursor: tab.doc.cursor_char,
-                dirty: tab.doc.dirty,
-                markdown: tab.doc.markdown,
-                moodboard: tab.doc.moodboard,
-                mood_items: tab.mood_items.clone(),
-                page_id: tab.doc.id,
-                parent_id: tab.page_parent,
-                page_title: tab.page_title.clone(),
-                workspace: tab.workspace.clone(),
-            })
-            .collect();
+        let tabs = self.tabs.iter().map(tab_snapshot).collect();
         // Never call Context again from inside an input closure: it holds the
         // context read lock. Native viewport geometry makes this branch run,
         // unlike test inputs without an inner_rect.
@@ -1499,6 +1547,7 @@ impl NotepadApp {
             navigation_visible: self.design.sidebar,
             navigation_width: self.design.sidebar_width,
             interface_scale,
+            ui_density_version: 1,
         }
     }
 
@@ -2346,6 +2395,7 @@ impl NotepadApp {
             Action::SaveAll => self.save_all(),
             Action::CloseTab => self.maybe_close_tab(self.active),
             Action::CloseWindow => {
+                self.quit_all_windows = false;
                 if self.has_unsaved() {
                     self.pending_quit = true;
                 } else {
@@ -2353,7 +2403,7 @@ impl NotepadApp {
                 }
             }
             Action::Quit => {
-                close_other_instances();
+                self.quit_all_windows = true;
                 if self.has_unsaved() {
                     self.pending_quit = true;
                 } else {
@@ -3048,7 +3098,10 @@ impl eframe::App for NotepadApp {
             if self.design.capture.is_some() {
                 return;
             }
-            if self.has_unsaved() && !self.pending_quit {
+            if self.close_confirmed {
+                return;
+            }
+            if self.has_unsaved() {
                 self.pending_quit = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             } else if !self.has_unsaved() {
@@ -3263,114 +3316,7 @@ impl eframe::App for NotepadApp {
 
         self.page_setup_window(&ctx);
 
-        if self.pending_quit {
-            let mut keep_open = true;
-            egui::Window::new("Enregistrer les modifications ?")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(&ctx, |ui| {
-                    ui.label("Certains onglets contiennent des modifications non enregistrees.");
-                    ui.horizontal(|ui| {
-                        if ui.button("Enregistrer").clicked() {
-                            for index in 0..self.tabs.len() {
-                                if self.tabs[index].doc.dirty {
-                                    self.active = index;
-                                    self.save_active(false);
-                                }
-                            }
-                            if !self.has_unsaved() {
-                                keep_open = false;
-                            }
-                        }
-                        if ui.button("Ne pas enregistrer").clicked() {
-                            keep_open = false;
-                        }
-                        if ui.button("Annuler").clicked() {
-                            keep_open = false;
-                            self.pending_quit = false;
-                        }
-                    });
-                });
-            if !keep_open {
-                self.pending_quit = false;
-                self.save_session(&ctx);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-        }
-
-        if let Some(path) = self.pending_ansi_save.clone() {
-            let mut open = true;
-            egui::Window::new("Conversion ANSI")
-                .collapsible(false)
-                .resizable(false)
-                .open(&mut open)
-                .show(&ctx, |ui| {
-                    ui.label("Certains caractères ne peuvent pas être représentés en ANSI (Windows-1252). Ils seraient remplacés et perdus.");
-                    ui.label(format!("Fichier : {}", path.display()));
-                    ui.horizontal(|ui| {
-                        if ui.button("Enregistrer quand même").clicked() {
-                            self.pending_ansi_save = None;
-                            self.write_active_to(path.clone());
-                        }
-                        if ui.button("Annuler").clicked() {
-                            self.pending_ansi_save = None;
-                        }
-                    });
-                });
-            if !open {
-                self.pending_ansi_save = None;
-            }
-        }
-
-        if let Some(doc_id) = self.pending_close.first().copied() {
-            let mut resolved = false;
-            let mut save = false;
-            let mut cancel = false;
-            let title = self
-                .tabs
-                .iter()
-                .find(|tab| tab.doc.id == doc_id)
-                .map(|tab| tab.doc.title())
-                .unwrap_or_default();
-            egui::Window::new("Fermer l'onglet ?")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(&ctx, |ui| {
-                    ui.label(format!(
-                        "« {title} » contient des modifications non enregistrees."
-                    ));
-                    ui.horizontal(|ui| {
-                        if ui.button("Enregistrer").clicked() {
-                            save = true;
-                            resolved = true;
-                        }
-                        if ui.button("Ne pas enregistrer").clicked() {
-                            resolved = true;
-                        }
-                        if ui.button("Annuler").clicked() {
-                            cancel = true;
-                        }
-                    });
-                });
-            if cancel {
-                self.pending_close.clear();
-            } else if resolved {
-                if save {
-                    if let Some(index) = self.tabs.iter().position(|tab| tab.doc.id == doc_id) {
-                        self.active = index;
-                        self.save_active(false);
-                    }
-                }
-                if let Some(index) = self.tabs.iter().position(|tab| tab.doc.id == doc_id) {
-                    if !self.tabs[index].doc.dirty {
-                        self.close_tab(index);
-                    }
-                }
-                self.pending_close.remove(0);
-            }
-        }
+        self.close_dialogs_ui(&ctx);
 
         // Couper / Copier / Coller depuis le menu : on rejoue le raccourci
         // natif gere par le widget de texte.
@@ -3392,12 +3338,18 @@ impl eframe::App for NotepadApp {
         }
 
         self.capture_preview(&ctx);
-        if self.design.capture.is_none() {
+        if self.design.capture.is_none() && !self.close_confirmed && !self.pending_quit {
             self.sync_workspace(&ctx);
         }
         if self.close_requested {
             self.close_requested = false;
-            self.save_session(&ctx);
+            if !self.close_confirmed {
+                self.save_session(&ctx);
+            }
+            if self.quit_all_windows {
+                close_other_instances();
+                self.quit_all_windows = false;
+            }
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         } else if self.session_dirty && self.last_session_save.elapsed() >= Duration::from_secs(3) {
             // Autosauvegarde, comme la tache periodique du Bloc-notes.

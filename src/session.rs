@@ -46,6 +46,7 @@ pub struct Session {
     pub navigation_visible: bool,
     pub navigation_width: f32,
     pub interface_scale: f32,
+    pub ui_density_version: u8,
 }
 
 impl Default for Session {
@@ -65,7 +66,8 @@ impl Default for Session {
             sync_baseline: Vec::new(),
             navigation_visible: true,
             navigation_width: 256.0,
-            interface_scale: 1.25,
+            interface_scale: 1.0,
+            ui_density_version: 0,
         }
     }
 }

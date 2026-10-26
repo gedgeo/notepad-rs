@@ -82,3 +82,13 @@ Ces vues globales et rapprochées ont été ouvertes pour vérifier le rendu, no
 - [x] Tests et compilation réussis.
 - [x] Session utilisateur préservée pendant les captures.
 - [ ] Vérification manuelle complémentaire des dialogues Windows et lecteurs d'écran.
+
+## Correction des confirmations et de l’échelle — 26 octobre 2026
+
+- Confirmation modale au-dessus du moodboard : les éléments du canevas ne captent plus les clics du dialogue.
+- Annuler conserve la fenêtre et ses modifications ; Ne pas enregistrer ferme réellement la page et ne restaure pas le texte abandonné dans la session.
+- Une erreur, une annulation du choix de fichier ou une confirmation ANSI en attente empêche la fermeture. Quitter ne ferme les autres fenêtres qu’après validation.
+- Enregistrement des moodboards en JSON avec images incorporées, puis réouverture comme moodboard.
+- Échelle initiale ramenée à 100 %, composants plus compacts et titres de dialogue à 20 px. Migration unique des anciennes sessions au réglage initial de 125 %.
+- Validation : compilation réussie et 103 tests réussis, dont 8 régressions sur les boutons, les erreurs, ANSI et la sauvegarde du moodboard.
+- Capture native vérifiée : `samples/previews/close-dialog-fixed.png`. Les boîtes de choix de fichier Windows restent à vérifier manuellement.
