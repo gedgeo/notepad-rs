@@ -1121,7 +1121,7 @@ impl NotepadApp {
         if export { let path=std::env::current_dir().unwrap_or_default().join("moodboard_export.json"); if let Ok(data)=serde_json::to_vec_pretty(&self.active_tab().mood_items){if std::fs::write(&path,data).is_ok(){self.status=format!("Moodboard exporté : {}",path.display());}}}
         if let Some(i)=remove {if i<self.active_tab().mood_items.len(){self.active_tab_mut().mood_items.remove(i);self.selected_mood_item=None;self.active_tab_mut().doc.dirty=true;self.session_dirty=true;}}
         if let Some(i)=duplicate {if let Some(mut item)=self.active_tab().mood_items.get(i).cloned(){item.x+=24.0;item.y+=24.0;self.active_tab_mut().mood_items.push(item);self.selected_mood_item=Some(self.active_tab().mood_items.len()-1);self.active_tab_mut().doc.dirty=true;self.session_dirty=true;}}
-        let (response, _)=ui.allocate_painter(ui.available_size(),egui::Sense::hover()); let tab_id=self.active_tab().doc.id; let selected=self.selected_mood_item; let tab=self.active_tab_mut();
+        let (response, _)=ui.allocate_painter(ui.available_size(),egui::Sense::hover()); let tab_id=self.active_tab().doc.id; let selected=self.selected_mood_item; let tab=self.active_tab_mut(); let mut clicked_item = None;
         for (index,item) in tab.mood_items.iter_mut().enumerate(){let id=egui::Id::new(("mood-item",tab_id,index));let shown=egui::Area::new(id).fixed_pos(response.rect.min+egui::vec2(item.x,item.y)).show(ctx,|ui|{
             let fill=match item.color{1=>egui::Color32::from_rgb(220,240,180),2=>egui::Color32::from_rgb(190,225,250),3=>egui::Color32::from_rgb(245,205,220),_=>egui::Color32::from_rgb(250,235,160)};let stroke=if selected==Some(index){egui::Stroke::new(3.0,egui::Color32::from_rgb(40,100,220))}else{egui::Stroke::NONE};
             egui::Frame::NONE.fill(fill).stroke(stroke).inner_margin(egui::Margin::same(10)).show(ui,|ui|{
@@ -1129,7 +1129,8 @@ impl NotepadApp {
                 ui.horizontal(|ui|{ui.label("Couleur");egui::ComboBox::from_id_salt(("mood-color",tab_id,index)).selected_text(item.color.to_string()).show_ui(ui,|ui|{for c in 0..4u8{ui.selectable_value(&mut item.color,c,c.to_string());}});});
                 if let Some(path)=&item.image_path{if let Ok(bytes)=std::fs::read(path){if let Ok(image)=image::load_from_memory(&bytes){let rgba=image.to_rgba8();let color=egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize,rgba.height() as usize],rgba.as_raw());let texture=ctx.load_texture(format!("mood-image-{tab_id}-{index}"),color,egui::TextureOptions::LINEAR);ui.image((texture.id(),egui::vec2(item.width-20.0,item.height-65.0).max(egui::vec2(40.0,40.0))));}}}
                 ui.horizontal(|ui|{ui.add(egui::DragValue::new(&mut item.width).range(80.0..=1200.0));ui.add(egui::DragValue::new(&mut item.height).range(60.0..=900.0));});ui.add(egui::TextEdit::multiline(&mut item.text).desired_width(item.width-20.0).desired_rows(3));ui.text_edit_singleline(item.link.get_or_insert_with(String::new));if item.link.as_deref()==Some(""){item.link=None;}if let Some(link)=item.link.as_deref(){ui.hyperlink_to("Ouvrir le lien",link);}
-            });});if shown.response.clicked(){self.selected_mood_item=Some(index);}}
+            });});if shown.response.clicked(){clicked_item=Some(index);}}
+        if clicked_item.is_some(){self.selected_mood_item=clicked_item;}
     }
 
     fn markdown_preview_ui(&mut self, ui: &mut egui::Ui) {
