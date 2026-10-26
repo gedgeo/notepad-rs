@@ -2566,6 +2566,22 @@ impl eframe::App for NotepadApp {
         }
 
         let mut typed = false;
+        // Barre laterale de pages, inspirée de Notion : chaque onglet devient une page navigable.
+        let mut page_to_select = None;
+        let mut create_page = false;
+        egui::SidePanel::left("notion-pages-sidebar").resizable(true).default_width(210.0).show(ctx, |ui| {
+            ui.heading("Pages");
+            ui.separator();
+            if ui.button("+ Nouvelle page").clicked() { create_page = true; }
+            ui.add_space(4.0);
+            for (index, tab) in self.tabs.iter().enumerate() {
+                let title = tab.doc.title();
+                let label = if tab.doc.moodboard { format!("🎨 {title}") } else { format!("📄 {title}") };
+                if ui.selectable_label(index == self.active, label).clicked() { page_to_select = Some(index); }
+            }
+        });
+        if create_page { self.new_tab(); self.session_dirty = true; }
+        if let Some(index) = page_to_select { self.active = index; self.pending_focus = true; }
         egui::CentralPanel::default().show(ui, |ui| {
             if self.show_print_preview {
                 self.print_preview_ui(ui);
