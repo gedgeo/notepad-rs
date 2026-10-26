@@ -105,6 +105,8 @@ pub struct SessionTab {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PageOptions {
+    /// None keeps the legacy free canvas; dimensions are logical pixels.
+    pub canvas_size: Option<[u32; 2]>,
     pub uid: String,
     pub aliases: Vec<String>,
     pub visual_blocks: bool,

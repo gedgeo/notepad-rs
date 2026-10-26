@@ -581,6 +581,7 @@ impl NotepadApp {
             self.design.board_zoom = 1.0;
         }
         let before = serde_json::to_vec(&self.active_tab().mood_items).ok();
+        let canvas_before = self.active_tab().workspace.canvas_size;
         ui.add_space(12.0);
         ui.label(
             egui::RichText::new(page_title(self.active_tab())).font(egui::FontId::new(
@@ -590,7 +591,7 @@ impl NotepadApp {
         );
         ui.add_space(12.0);
         let mut import = false;
-        let fit = false;
+        let mut fit = false;
         ui.horizontal_wrapped(|ui| {
             if ui
                 .add(primary(format!("{} Ajouter", icons::PLUS)))
@@ -610,6 +611,58 @@ impl NotepadApp {
                 .on_hover_text("Sélectionner");
             ui.selectable_value(&mut self.design.board_hand, true, icons::HAND)
                 .on_hover_text("Déplacer le canevas");
+            ui.menu_button("Taille du canvas", |ui| {
+                let size = &mut self.tabs[self.active].workspace.canvas_size;
+                for (label, preset) in [
+                    ("Libre", None),
+                    ("Carré — 1080 × 1080", Some([1080, 1080])),
+                    ("Paysage — 1920 × 1080", Some([1920, 1080])),
+                    ("Portrait — 1080 × 1920", Some([1080, 1920])),
+                    ("A4 portrait — 794 × 1123", Some([794, 1123])),
+                ] {
+                    if ui.selectable_label(*size == preset, label).clicked() {
+                        *size = preset;
+                        fit = true;
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                if ui.button("Personnalisée…").clicked() {
+                    *size = Some(size.unwrap_or([1920, 1080]));
+                }
+                if let Some([width, height]) = size {
+                    ui.horizontal(|ui| {
+                        ui.label("Largeur");
+                        if ui
+                            .add(egui::DragValue::new(width).range(100..=16384).suffix(" px"))
+                            .changed()
+                        {
+                            fit = true;
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Hauteur");
+                        if ui
+                            .add(
+                                egui::DragValue::new(height)
+                                    .range(100..=16384)
+                                    .suffix(" px"),
+                            )
+                            .changed()
+                        {
+                            fit = true;
+                        }
+                    });
+                    if ui.button("Permuter largeur / hauteur").clicked() {
+                        std::mem::swap(width, height);
+                        fit = true;
+                    }
+                }
+                ui.label("Les éléments restent conservés hors du cadre.");
+            });
+            if let Some([w, h]) = self.active_tab().workspace.canvas_size {
+                ui.weak(format!("{w} × {h} px"));
+            }
         });
         ui.add_space(12.0);
         if import {
@@ -649,9 +702,15 @@ impl NotepadApp {
                             item.y + item.height + 30.0,
                         ))
                     });
+            let max = self
+                .active_tab()
+                .workspace
+                .canvas_size
+                .map(|[w, h]| egui::vec2(w as f32, h as f32))
+                .unwrap_or(max);
             self.design.board_zoom = ((rect.width() - 30.0) / max.x)
                 .min((rect.height() - 30.0) / max.y)
-                .clamp(0.25, 1.5);
+                .clamp(0.02, 1.5);
             self.design.board_pan = egui::vec2(8.0, 8.0);
         }
         if self.design.board_hand && canvas.dragged() {
@@ -662,6 +721,17 @@ impl NotepadApp {
         }
         let zoom = self.design.board_zoom;
         let pan = self.design.board_pan;
+        if let Some([w, h]) = self.active_tab().workspace.canvas_size {
+            let bounds =
+                egui::Rect::from_min_size(rect.min + pan, egui::vec2(w as f32, h as f32) * zoom);
+            painter.rect_filled(bounds, 0.0, ui.visuals().panel_fill);
+            painter.rect_stroke(
+                bounds,
+                0.0,
+                egui::Stroke::new(2.0, BLUE),
+                egui::StrokeKind::Inside,
+            );
+        }
         let dot = if ui.visuals().dark_mode {
             egui::Color32::from_gray(65)
         } else {
@@ -828,7 +898,7 @@ impl NotepadApp {
                                 .on_hover_text("Réduire le zoom")
                                 .clicked()
                             {
-                                self.design.board_zoom = (self.design.board_zoom / 1.15).max(0.25);
+                                self.design.board_zoom = (self.design.board_zoom / 1.15).max(0.02);
                             }
                             ui.label(format!("{} %", (self.design.board_zoom * 100.0).round()));
                             if ui
@@ -848,15 +918,23 @@ impl NotepadApp {
                                         ))
                                     },
                                 );
+                                let max = self
+                                    .active_tab()
+                                    .workspace
+                                    .canvas_size
+                                    .map(|[w, h]| egui::vec2(w as f32, h as f32))
+                                    .unwrap_or(max);
                                 self.design.board_zoom = ((rect.width() - 24.0) / max.x)
                                     .min((rect.height() - 72.0) / max.y)
-                                    .clamp(0.25, 1.5);
+                                    .clamp(0.02, 1.5);
                                 self.design.board_pan = egui::vec2(8.0, 8.0);
                             }
                         });
                     });
             });
-        if before != serde_json::to_vec(&self.active_tab().mood_items).ok() {
+        if before != serde_json::to_vec(&self.active_tab().mood_items).ok()
+            || canvas_before != self.active_tab().workspace.canvas_size
+        {
             self.active_tab_mut().doc.dirty = true;
             self.session_dirty = true;
         }
@@ -943,6 +1021,9 @@ impl NotepadApp {
             self.design.inspector = true;
         }
         if mode.starts_with("moodboard") {
+            if mode.contains("canvas") {
+                self.active_tab_mut().workspace.canvas_size = Some([1920, 1080]);
+            }
             self.selected_mood_tab = Some(self.active_tab().doc.id);
             self.selected_mood_item = Some(0);
             self.design.board_zoom = 0.8;

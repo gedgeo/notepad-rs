@@ -41,3 +41,5 @@ target\x86_64-pc-windows-gnu\debug\notepad-rs.exe --design-preview=notes --captu
 Modes de vérification : `notes`, `blocks`, `moodboard`, `notes-narrow`. Le mode de capture ne sauvegarde pas la session de démonstration et se ferme après la capture. Le dossier `samples/design-assets` doit être présent pour reproduire le moodboard d'exemple.
 
 Les comparaisons sont générées par `tools/compare_ui.py` (Pillow requis uniquement pour cet outil de développement). L'évaluation est consignée dans `design-qa.md`.
+
+Chaque moodboard propose « Taille du canvas » dans sa barre d’outils : Libre (comportement historique), Carré 1080 × 1080, Paysage 1920 × 1080, Portrait 1080 × 1920, A4 portrait 794 × 1123 pixels logiques, ou dimensions personnalisées de 100 à 16384 px. Les dimensions peuvent être permutées. Le cadre bleu représente la surface ; les éléments hors cadre restent accessibles. « Ajuster » tient compte du format choisi. La taille est conservée dans les sessions et fichiers moodboard JSON.

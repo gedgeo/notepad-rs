@@ -417,6 +417,7 @@ mod tests {
         let (mut app, ctx, dir) = fixture();
         app.new_moodboard();
         app.active_tab_mut().mood_items[0].text = "Note importante".into();
+        app.active_tab_mut().workspace.canvas_size = Some([1920, 1080]);
         let path = dir.join("board.json");
         app.active_tab_mut().doc.path = Some(path.clone());
         app.pending_quit = true;
@@ -430,6 +431,10 @@ mod tests {
         restored.open_path(path);
         assert!(restored.active_tab().doc.moodboard);
         assert_eq!(restored.active_tab().mood_items[0].text, "Note importante");
+        assert_eq!(
+            restored.active_tab().workspace.canvas_size,
+            Some([1920, 1080])
+        );
         cleanup(dir);
     }
 }
