@@ -10,6 +10,7 @@
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
 mod blocks;
+mod board_export;
 mod close_dialogs;
 mod doc;
 mod encoding;
@@ -17,12 +18,15 @@ mod find;
 mod format;
 mod header;
 mod markdown;
+mod moodboard_panel;
+mod commands;
 #[cfg(test)]
 mod notepad_checks;
 mod page;
 mod pdf_export;
 mod print;
 mod session;
+mod settings;
 mod ui_design;
 mod workspace_io;
 
@@ -229,6 +233,10 @@ impl History {
 // ---------------------------------------------------------------------------
 
 struct FindState {
+    whole_words: bool,
+    regex: bool,
+    selection_only: bool,
+    scope: Option<(u64, usize, usize)>,
     needle: String,
     replacement: String,
     match_case: bool,
@@ -240,6 +248,10 @@ struct FindState {
 impl Default for FindState {
     fn default() -> Self {
         FindState {
+            whole_words: false,
+            regex: false,
+            selection_only: false,
+            scope: None,
             needle: String::new(),
             replacement: String::new(),
             match_case: false,
@@ -281,6 +293,7 @@ impl Tab {
     }
 
     fn open(id: u64, path: PathBuf, bytes: Vec<u8>) -> Result<Tab, String> {
+        let disk_hash = Some(workspace_io::hash(&bytes));
         let doc = Doc::from_bytes(id, path, bytes);
         let max_chars = doc
             .text
@@ -296,6 +309,7 @@ impl Tab {
             page_parent: None,
             page_title: String::new(),
             workspace: session::PageOptions {
+                disk_hash,
                 uid: workspace_io::uid(),
                 ..Default::default()
             },
@@ -303,16 +317,7 @@ impl Tab {
     }
 
     fn touch(&mut self) {
-        if let Some(previous) = self.history.states.get(self.history.index) {
-            if previous != &self.doc.text
-                && self.history.last_push.elapsed() >= Duration::from_secs(30)
-            {
-                self.workspace.versions.push(previous.clone());
-                if self.workspace.versions.len() > 50 {
-                    self.workspace.versions.remove(0);
-                }
-            }
-        }
+        self.workspace.modified_at = chrono::Utc::now().to_rfc3339();
         self.doc.dirty = true;
         self.max_chars = self
             .doc
@@ -350,6 +355,7 @@ enum Action {
     DeleteSelection,
     Font,
     SetEncoding(Encoding),
+    ReopenEncoding(Encoding),
     SetEol(Eol),
     ToggleWrap,
     SetTheme(ThemeMode),
@@ -503,6 +509,7 @@ fn available_system_fonts() -> &'static [(String, PathBuf, u32)] {
 }
 
 struct NotepadApp {
+    options: settings::State,
     design: ui_design::State,
     tabs: Vec<Tab>,
     active: usize,
@@ -581,10 +588,13 @@ struct NotepadApp {
 
 impl NotepadApp {
     fn sync_workspace(&mut self, ctx: &egui::Context) {
+        if self.options.sync_paused {
+            return;
+        }
         let Some(dir) = self.sync_directory.clone() else {
             return;
         };
-        if self.last_sync.elapsed() < Duration::from_secs(5) {
+        if self.last_sync.elapsed() < Duration::from_secs(self.preferences.sync_seconds) {
             return;
         }
         self.last_sync = Instant::now();
@@ -638,336 +648,12 @@ impl NotepadApp {
         })();
         if let Err(error) = result {
             self.status = format!("Synchronisation suspendue : {error}");
+            self.options.sync_error = Some(self.status.clone());
+        } else {
+            self.options.sync_error = None;
+            self.options.last_sync = Some(chrono::Local::now().format("%H:%M:%S").to_string());
         }
-        ctx.request_repaint_after(Duration::from_secs(5));
-    }
-
-    fn workspace_tools(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let titles: Vec<String> = self
-            .tabs
-            .iter()
-            .map(|t| {
-                if t.page_title.is_empty() {
-                    t.doc.title()
-                } else {
-                    t.page_title.clone()
-                }
-            })
-            .collect();
-        let active = self.active;
-        let mut select = None;
-        let mut insert = None;
-        let mut restore = None;
-        let mut move_page = None;
-        let mut changed = false;
-        let mut import_workspace = None;
-        egui::Panel::right("workspace-tools")
-            .default_size(235.0)
-            .resizable(true)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical().id_salt("workspace-tools-scroll").show(ui, |ui| {
-                ui.horizontal(|ui|{ui.heading("Espace de travail");if ui.small_button("Fermer").clicked(){self.design.settings=false;}});
-                ui.collapsing("Préférences du Bloc-notes", |ui| {
-                    if ui.checkbox(&mut self.preferences.recent_enabled, "Conserver les fichiers récents").changed() {
-                        if !self.preferences.recent_enabled { self.recent.clear(); }
-                        self.session_dirty = true;
-                    }
-                    if ui.checkbox(&mut self.preferences.open_new_window, "Ouvrir les fichiers dans une nouvelle fenêtre").changed() { self.session_dirty = true; }
-                    ui.label("Sinon, ouvrir dans un onglet de cette fenêtre.");
-                    if ui.button("Effacer les fichiers récents").clicked() { self.recent.clear(); self.session_dirty = true; }
-                });
-                let tab = &mut self.tabs[active];
-                changed |= ui.checkbox(&mut tab.workspace.favorite, "Favori").changed();
-                changed |= ui.checkbox(&mut tab.workspace.pinned, "Épinglée").changed();
-                changed |= ui
-                    .checkbox(&mut tab.workspace.trashed, "Dans la corbeille")
-                    .changed();
-                ui.label("Icône");
-                changed |= ui.text_edit_singleline(&mut tab.workspace.icon).changed();
-                changed |= ui
-                    .color_edit_button_srgb(&mut tab.workspace.color)
-                    .changed();
-                changed |= ui.checkbox(&mut tab.workspace.visual_blocks, "Éditeur visuel de blocs").changed();
-                ui.menu_button("Insérer un bloc", |ui| {
-                    for (name, text) in [
-                        ("Titre", "\n## Titre\n"),
-                        ("Tâche", "\n- [ ] Tâche\n"),
-                        ("Citation", "\n> Citation\n"),
-                        ("Code", "\n```\ncode\n```\n"),
-                        ("Séparateur", "\n---\n"),
-                        ("Tableau", "\n| Nom | Valeur |\n| --- | --- |\n| | |\n"),
-                    ] {
-                        if ui.button(name).clicked() {
-                            insert = Some(text.to_owned());
-                            ui.close();
-                        }
-                    }
-                });
-                ui.collapsing("Historique", |ui| {
-                    if ui.button("Créer une version").clicked() {
-                        tab.workspace.versions.push(tab.doc.text.clone());
-                        if tab.workspace.versions.len() > 50 {
-                            tab.workspace.versions.remove(0);
-                        }
-                        changed = true;
-                    }
-                    for (i, _) in tab.workspace.versions.iter().enumerate().rev() {
-                        if ui
-                            .button(format!("Restaurer la version {}", i + 1))
-                            .clicked()
-                        {
-                            restore = Some(i);
-                        }
-                    }
-                });
-                ui.separator();
-                ui.label("Liens vers les pages");
-                for (i, title) in titles.iter().enumerate() {
-                    if i == active {
-                        continue;
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.link(title).clicked() {
-                            select = Some(i);
-                        }
-                        if ui.small_button("Insérer").clicked() {
-                            insert = Some(format!("[[id:{}|{title}]]", self.tabs[i].workspace.uid));
-                        }
-                    });
-                }
-                ui.collapsing("Liens de cette page", |ui| {
-                    for target in wiki_targets(&self.tabs[active].doc.text) {
-                        if let Some(i) = resolve_page(&self.tabs, &target) {
-                            if ui.link(&titles[i]).clicked() {
-                                select = Some(i);
-                            }
-                        } else {
-                            ui.label(format!("{target} (page introuvable)"));
-                        }
-                    }
-                });
-                ui.collapsing("Favoris et épinglées", |ui| {
-                    for (i, tab) in self.tabs.iter().enumerate() {
-                        if !tab.workspace.trashed
-                            && (tab.workspace.favorite || tab.workspace.pinned)
-                            && ui.button(&titles[i]).clicked()
-                        {
-                            select = Some(i);
-                        }
-                    }
-                });
-                ui.collapsing("Corbeille", |ui| {
-                    for (i, tab) in self.tabs.iter_mut().enumerate() {
-                        if tab.workspace.trashed
-                            && ui.button(format!("Restaurer {}", titles[i])).clicked()
-                        {
-                            tab.workspace.trashed = false;
-                            changed = true;
-                        }
-                    }
-                });
-                ui.collapsing("Organiser par glisser-déposer", |ui| {
-                    ui.label("Déposer sur une page pour en faire une sous-page.");
-                    if ui.button("Remettre la page active à la racine").clicked() {
-                        self.tabs[active].page_parent = None;
-                        changed = true;
-                    }
-                    for (i, tab) in self.tabs.iter().enumerate() {
-                        let row = ui.dnd_drag_source(
-                            egui::Id::unique(("page-drag", tab.doc.id)),
-                            i,
-                            |ui| {
-                                ui.label(&titles[i]);
-                            },
-                        );
-                        if let Some(source) = row.response.dnd_release_payload::<usize>() {
-                            move_page = Some((*source, i));
-                        }
-                    }
-                });
-                ui.collapsing("Exporter", |ui| {
-                    for ext in ["md", "html"] {
-                        if ui.button(format!("Exporter .{ext}")).clicked() {
-                            if let Some(path) =
-                                rfd::FileDialog::new().add_filter(ext, &[ext]).save_file()
-                            {
-                                let content = if ext == "html" {
-                                    markdown::to_html(&self.tabs[active].doc.text)
-                                } else {
-                                    self.tabs[active].doc.text.clone()
-                                };
-                                self.status = match std::fs::write(path, content) {
-                                    Ok(()) => "Export terminé".into(),
-                                    Err(e) => e.to_string(),
-                                };
-                            }
-                        }
-                    }
-                    if ui.button("Exporter .pdf…").clicked() {
-                        if let Some(path) = rfd::FileDialog::new().add_filter("PDF", &["pdf"]).save_file() {
-                            self.status = match pdf_export::export(&path, &titles[active], &self.tabs[active].doc.text) {
-                                Ok(()) => "PDF exporté".into(), Err(e) => format!("Export PDF impossible : {e}"),
-                            };
-                        }
-                    }
-                });
-                ui.collapsing("Sauvegarde", |ui| {
-                    if ui.button("Exporter l’espace de travail…").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Session JSON", &["json"])
-                            .save_file()
-                        {
-                            self.status = match workspace_io::portable(self.session_snapshot(ctx)).and_then(|s| s.save_to(&path)) {
-                                Ok(()) => "Sauvegarde terminée".into(),
-                                Err(e) => e.to_string(),
-                            };
-                        }
-                    }
-                    if ui.button("Restaurer une sauvegarde…").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Session JSON", &["json"])
-                            .pick_file()
-                        {
-                            import_workspace = Some(path);
-                        }
-                    }
-                    ui.label("Synchronisation manuelle par dossier partagé (OneDrive, réseau…)");
-                    if ui.button("Publier dans un dossier…").clicked() {
-                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                            let path = dir.join("notepad-rs-workspace.json");
-                            let backup = dir.join(format!(
-                                "notepad-rs-backup-{}.json",
-                                chrono::Local::now().format("%Y%m%d-%H%M%S-%f")
-                            ));
-                            let result = if path.exists() {
-                                std::fs::copy(&path, backup).map(|_| ())
-                            } else {
-                                Ok(())
-                            };
-                            self.status = match result
-                                .and_then(|_| workspace_io::portable(self.session_snapshot(ctx)).and_then(|s| s.save_to(&path)))
-                            {
-                                Ok(()) => "Espace publié ; ancienne version sauvegardée".into(),
-                                Err(e) => e.to_string(),
-                            };
-                        }
-                    }
-                    if ui.button("Récupérer depuis un dossier…").clicked() {
-                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                            import_workspace = Some(dir.join("notepad-rs-workspace.json"));
-                        }
-                    }
-                    if ui.button("Activer la synchronisation automatique…").clicked() {
-                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                            self.sync_directory = Some(dir.to_string_lossy().into_owned());
-                            self.sync_baseline.clear(); self.last_sync = Instant::now() - Duration::from_secs(6); changed = true;
-                        }
-                    }
-                    if self.sync_directory.is_some() {
-                        ui.label("Synchronisation toutes les 5 secondes ; les conflits sont conservés en copies.");
-                        if ui.button("Désactiver la synchronisation").clicked() { self.sync_directory = None; changed = true; }
-                    }
-                });
-                });
-            });
-        if let Some(path) = import_workspace {
-            match workspace_io::read(&path) {
-                Ok(mut saved) => {
-                    let mut mapping = std::collections::HashMap::new();
-                    for page in &mut saved.tabs {
-                        let old = page.workspace.uid.clone();
-                        page.workspace.uid = workspace_io::uid();
-                        if !old.is_empty() {
-                            mapping.insert(old, page.workspace.uid.clone());
-                        }
-                    }
-                    for page in &mut saved.tabs {
-                        if let Some(text) = &mut page.text {
-                            for (old, new) in &mapping {
-                                *text =
-                                    text.replace(&format!("[[id:{old}|"), &format!("[[id:{new}|"));
-                            }
-                        }
-                    }
-                    let validation = saved.tabs.iter_mut().try_for_each(|page| {
-                        workspace_io::materialize(page, &session::data_dir().join("assets"))
-                    });
-                    if let Err(error) = validation {
-                        self.status = format!("Sauvegarde non importée : {error}");
-                        return;
-                    }
-                    let offset = self.next_id;
-                    let count = saved.tabs.len();
-                    for mut page in saved.tabs {
-                        page.page_id = page.page_id.saturating_add(offset);
-                        page.parent_id = page.parent_id.map(|id| id.saturating_add(offset));
-                        if let Some(tab) = self.restore_tab(page) {
-                            self.tabs.push(tab);
-                        }
-                    }
-                    self.status = format!("{count} page(s) importée(s), pages locales conservées");
-                    changed = true;
-                }
-                Err(e) => self.status = format!("Import impossible : {e}"),
-            }
-        }
-        if let Some(i) = restore {
-            let old = self.tabs[active].doc.text.clone();
-            self.tabs[active].doc.text = self.tabs[active].workspace.versions[i].clone();
-            self.tabs[active].workspace.versions.push(old);
-            self.tabs[active].touch();
-            changed = true;
-        }
-        if let Some(text) = insert {
-            self.tabs[active].doc.text.push_str(&text);
-            self.tabs[active].doc.markdown = true;
-            self.tabs[active].touch();
-            changed = true;
-        }
-        if let Some((from, to)) = move_page {
-            if from < self.tabs.len() && to < self.tabs.len() && from != to {
-                let source_id = self.tabs[from].doc.id;
-                let target_id = self.tabs[to].doc.id;
-                let mut parent = Some(target_id);
-                let mut seen = std::collections::HashSet::new();
-                let mut cycle = false;
-                while let Some(id) = parent {
-                    if id == source_id || !seen.insert(id) {
-                        cycle = true;
-                        break;
-                    }
-                    parent = self
-                        .tabs
-                        .iter()
-                        .find(|t| t.doc.id == id)
-                        .and_then(|t| t.page_parent);
-                }
-                if !cycle {
-                    let id = self.tabs[active].doc.id;
-                    let mut tab = self.tabs.remove(from);
-                    tab.page_parent = Some(target_id);
-                    let position = self
-                        .tabs
-                        .iter()
-                        .position(|t| t.doc.id == target_id)
-                        .unwrap_or(0)
-                        + 1;
-                    self.tabs.insert(position, tab);
-                    self.active = self.tabs.iter().position(|t| t.doc.id == id).unwrap_or(0);
-                    changed = true;
-                } else {
-                    self.status =
-                        "Déplacement refusé : une page ne peut pas devenir son propre descendant"
-                            .into();
-                }
-            }
-        }
-        if let Some(i) = select {
-            self.active = i;
-            self.pending_focus = true;
-            changed = true;
-        }
-        self.session_dirty |= changed;
+        ctx.request_repaint_after(Duration::from_secs(self.preferences.sync_seconds));
     }
 
     fn new(
@@ -999,6 +685,7 @@ impl NotepadApp {
         }
         cc.egui_ctx.set_fonts(fonts);
         let mut app = NotepadApp {
+            options: settings::State::default(),
             design: ui_design::State::default(),
             tabs: Vec::new(),
             active: 0,
@@ -1082,6 +769,7 @@ impl NotepadApp {
                 app.normal_window = Some([x, y, w, h]);
             }
             app.preferences = session.preferences;
+            app.preferences.sanitize();
             app.recent = if app.preferences.recent_enabled {
                 session.recent
             } else {
@@ -1113,7 +801,10 @@ impl NotepadApp {
         }
         if app.tabs.is_empty() {
             app.new_tab();
+        } else if app.preferences.start_blank {
+            app.new_tab();
         }
+        app.options.recovery = Session::load_report(&app.session_file).1;
         app.register_bold_default(&cc.egui_ctx);
         app
     }
@@ -1168,6 +859,8 @@ impl NotepadApp {
         tab.page_parent = saved.parent_id;
         tab.page_title = saved.page_title;
         tab.workspace = saved.workspace;
+        tab.workspace.favorite |= tab.workspace.pinned;
+        tab.workspace.pinned = false;
         if tab.workspace.uid.is_empty() {
             tab.workspace.uid = workspace_io::uid();
         }
@@ -1199,12 +892,22 @@ impl NotepadApp {
     }
 
     fn new_tab(&mut self) {
+        self.new_page_kind(self.preferences.default_kind);
+    }
+
+    fn new_page_kind(&mut self, kind: u8) {
         let id = self.next_id;
         self.next_id += 1;
         let mut tab = Tab::new(id);
         tab.workspace.uid = workspace_io::uid();
         tab.doc.wrap = self.default_wrap;
         tab.doc.font_size = self.default_font_size;
+        tab.doc.encoding = session::encoding_from_code(self.preferences.default_encoding);
+        tab.doc.eol = session::eol_from_code(self.preferences.default_eol);
+        tab.workspace.modified_at = chrono::Utc::now().to_rfc3339();
+        tab.workspace.visual_blocks = kind == 1;
+        tab.doc.markdown = kind == 1;
+        tab.doc.moodboard = kind == 2;
         self.tabs.push(tab);
         self.active = self.tabs.len() - 1;
         self.session_dirty = true;
@@ -1321,7 +1024,15 @@ impl NotepadApp {
         if !self.preferences.recent_enabled {
             return;
         }
-        session::touch_recent_list(&mut self.recent, path);
+        if self.preferences.recent_limit == session::RECENT_LIMIT {
+            session::touch_recent_list(&mut self.recent, path);
+        } else {
+            session::touch_recent_list_with_limit(
+                &mut self.recent,
+                path,
+                self.preferences.recent_limit,
+            );
+        }
         self.session_dirty = true;
     }
 
@@ -1355,6 +1066,17 @@ impl NotepadApp {
     }
 
     fn write_active_to(&mut self, path: PathBuf) {
+        if self.options.allow_overwrite.take() != Some(self.active_tab().doc.id)
+            && self.active_tab().doc.path.as_ref() == Some(&path)
+        {
+            if let Some(expected) = self.active_tab().workspace.disk_hash {
+                if std::fs::read(&path).ok().map(|b| workspace_io::hash(&b)) != Some(expected) {
+                    self.options.external_write = Some((self.active_tab().doc.id, path));
+                    self.status = "Le fichier a changé sur disque. Choisissez une copie ou comparez avant de remplacer.".into();
+                    return;
+                }
+            }
+        }
         if self.active_tab().doc.moodboard {
             let mut page = tab_snapshot(self.active_tab());
             page.path = Some(path.to_string_lossy().into_owned());
@@ -1371,6 +1093,8 @@ impl NotepadApp {
                     let tab = self.active_tab_mut();
                     tab.doc.path = Some(path.clone());
                     tab.doc.dirty = false;
+                    tab.workspace.disk_hash =
+                        std::fs::read(&path).ok().map(|b| workspace_io::hash(&b));
                     self.status = format!("Moodboard enregistré : {}", path.display());
                     self.remember_recent(&path);
                 }
@@ -1385,6 +1109,7 @@ impl NotepadApp {
                 tab.doc.path = Some(path.clone());
                 tab.doc.dirty = false;
                 tab.doc.raw = std::fs::read(&path).ok();
+                tab.workspace.disk_hash = tab.doc.raw.as_ref().map(|b| workspace_io::hash(b));
                 self.status = format!("Enregistre : {}", path.display());
                 self.remember_recent(&path);
             }
@@ -1661,8 +1386,15 @@ impl NotepadApp {
         }
         let snapshot = self.session_snapshot(ctx);
         match snapshot.save_to(&self.session_file) {
-            Ok(()) => self.session_dirty = false,
-            Err(error) => self.status = format!("Session non enregistrée : {error}"),
+            Ok(()) => {
+                self.session_dirty = false;
+                self.options.save_error = None;
+                self.options.last_saved = Some(chrono::Local::now().format("%H:%M:%S").to_string());
+            }
+            Err(error) => {
+                self.status = format!("Session non enregistrée : {error}");
+                self.options.save_error = Some(self.status.clone());
+            }
         }
         self.last_session_save = Instant::now();
     }
@@ -1724,6 +1456,22 @@ impl NotepadApp {
     fn editor_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) -> bool {
         let index = self.active;
         let font = self.editor_font(self.tabs[index].doc.font_size * 17.0 / 15.0);
+        let line_height = font.size * self.preferences.line_height;
+        let mut layouter = |ui: &egui::Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| {
+            let mut job = egui::text::LayoutJob::default();
+            job.wrap.max_width = wrap_width;
+            job.append(
+                buffer.as_str(),
+                0.0,
+                egui::TextFormat {
+                    font_id: font.clone(),
+                    color: ui.visuals().text_color(),
+                    line_height: Some(line_height),
+                    ..Default::default()
+                },
+            );
+            ui.fonts_mut(|f| f.layout_job(job))
+        };
         let tab = &mut self.tabs[index];
         let wrap = tab.doc.wrap;
         let width = ui.available_width();
@@ -1744,8 +1492,10 @@ impl NotepadApp {
             };
             let editor_id = NotepadApp::editor_id(tab.doc.id);
             egui::TextEdit::multiline(&mut tab.doc.text)
+                .interactive(!tab.workspace.read_only)
                 .id(editor_id)
                 .font(font.clone())
+                .layouter(&mut layouter)
                 .desired_width(desired)
                 .desired_rows(30)
                 .lock_focus(true)
@@ -2143,94 +1893,148 @@ impl NotepadApp {
         }
     }
 
-    fn find_next(&mut self, backwards: bool) {
-        let needle = self.find.needle.clone();
-        if needle.is_empty() {
-            self.find.status = "Saisissez un texte a rechercher.".to_string();
-            return;
+    fn find_matches(&self) -> Result<Vec<find::Match>, String> {
+        let tab = self.active_tab();
+        let found = find::occurrences(
+            &tab.doc.text,
+            &self.find.needle,
+            self.find.match_case,
+            self.find.whole_words,
+            self.find.regex,
+        )?;
+        if !self.find.selection_only {
+            return Ok(found);
         }
-        let match_case = self.find.match_case;
-        let wrap = self.find.wrap;
-        let (text, from, selection) = {
-            let tab = self.active_tab();
-            let (start, end) = tab.doc.pending_selection.unwrap_or((0, 0));
-            let _ = (start, end);
-            (
-                tab.doc.text.clone(),
-                char_to_byte(&tab.doc.text, tab.doc.cursor_char),
-                tab.doc.selection_chars,
-            )
+        let Some((id, a, b)) = self.find.scope else {
+            return Ok(Vec::new());
         };
-        let _ = selection;
-        let found = if backwards {
-            find::find_previous(&text, &needle, from, match_case, wrap)
-        } else {
-            find::find_next(&text, &needle, from, match_case, wrap)
-        };
-        match found {
-            Some(found) => {
-                let chars_before = count_chars(&text, found.start);
-                let chars_len = count_chars(&text[found.start..found.end], 0);
-                let tab = self.active_tab_mut();
-                tab.doc.pending_selection = Some((chars_before, chars_before + chars_len));
-                tab.doc.cursor_char = chars_before + chars_len;
-                self.find.status = "1 occurrence selectionnee.".to_string();
+        if id != tab.doc.id {
+            return Ok(Vec::new());
+        }
+        let start = char_to_byte(&tab.doc.text, a);
+        let end = char_to_byte(&tab.doc.text, b);
+        Ok(found
+            .into_iter()
+            .filter(|m| m.start >= start && m.end <= end)
+            .collect())
+    }
+
+    fn find_next(&mut self, backwards: bool) {
+        let found = match self.find_matches() {
+            Ok(found) => found,
+            Err(error) => {
+                self.find.status = error;
+                return;
             }
-            None => self.find.status = "Impossible de trouver le texte.".to_string(),
+        };
+        let text = &self.active_tab().doc.text;
+        let from = char_to_byte(text, self.active_tab().doc.cursor_char);
+        let before = self
+            .active_tab()
+            .doc
+            .pending_selection
+            .filter(|(a, b)| a < b && *b == self.active_tab().doc.cursor_char)
+            .map(|(a, _)| char_to_byte(text, a))
+            .unwrap_or(from);
+        let selected = if backwards {
+            found.iter().rev().find(|m| m.end <= before).or_else(|| {
+                if self.find.wrap {
+                    found.last()
+                } else {
+                    None
+                }
+            })
+        } else {
+            found.iter().find(|m| m.start >= from).or_else(|| {
+                if self.find.wrap {
+                    found.first()
+                } else {
+                    None
+                }
+            })
+        };
+        if let Some(m) = selected {
+            let a = count_chars(text, m.start);
+            let b = count_chars(text, m.end);
+            let tab = self.active_tab_mut();
+            tab.doc.pending_selection = Some((a, b));
+            tab.doc.cursor_char = b;
+            self.find.status = format!(
+                "Occurrence {} sur {}",
+                found.iter().position(|v| v == m).unwrap_or(0) + 1,
+                found.len()
+            );
+        } else {
+            self.find.status = "Aucune occurrence dans ce sens et ce perimetre.".into();
         }
     }
 
     fn replace_current(&mut self) {
-        let needle = self.find.needle.clone();
-        let replacement = self.find.replacement.clone();
-        if needle.is_empty() {
+        if self.active_tab().workspace.read_only {
+            self.find.status = "Page en lecture seule".into();
             return;
         }
-        let (start, end) = {
-            let tab = self.active_tab();
-            match tab.doc.pending_selection {
-                Some(range) if range.1 > range.0 => range,
-                _ => {
-                    self.find.status = "Aucune selection a remplacer.".to_string();
-                    return;
-                }
+        let Some((a, b)) = self.active_tab().doc.pending_selection else {
+            return;
+        };
+        let start = char_to_byte(&self.active_tab().doc.text, a);
+        let end = char_to_byte(&self.active_tab().doc.text, b);
+        let found = match self.find_matches() {
+            Ok(found) => found,
+            Err(error) => {
+                self.find.status = error;
+                return;
             }
         };
-        let match_case = self.find.match_case;
-        let tab = self.active_tab_mut();
-        let bytes: Vec<usize> = byte_offsets(&tab.doc.text).collect();
-        if let (Some(&byte_start), Some(&byte_end)) = (bytes.get(start), bytes.get(end)) {
-            let selected = &tab.doc.text[byte_start..byte_end];
-            let same = if match_case {
-                selected == needle
-            } else {
-                selected.eq_ignore_ascii_case(&needle)
-            };
-            if same {
-                tab.doc
-                    .text
-                    .replace_range(byte_start..byte_end, &replacement);
-                tab.touch();
-                tab.doc.pending_selection = Some((start, start + replacement.chars().count()));
+        if found.iter().any(|m| m.start == start && m.end == end) {
+            let replacement = self.find.replacement.clone();
+            self.create_version("Avant remplacement");
+            let tab = self.active_tab_mut();
+            tab.doc.text.replace_range(start..end, &replacement);
+            tab.touch();
+            tab.doc.cursor_char = a + replacement.chars().count();
+            if let Some((_, _, scope_end)) = &mut self.find.scope {
+                *scope_end = scope_end.saturating_sub(b - a) + replacement.chars().count();
             }
+            self.session_dirty = true;
         }
         self.find_next(false);
     }
 
     fn replace_all(&mut self) {
-        let needle = self.find.needle.clone();
-        let replacement = self.find.replacement.clone();
-        if needle.is_empty() {
+        if self.active_tab().workspace.read_only {
+            self.find.status = "Page en lecture seule".into();
             return;
         }
-        let match_case = self.find.match_case;
-        let tab = self.active_tab_mut();
-        let (new_text, count) = find::replace_all(&tab.doc.text, &needle, &replacement, match_case);
-        if count > 0 {
-            tab.doc.text = new_text;
-            tab.touch();
+        let found = match self.find_matches() {
+            Ok(found) => found,
+            Err(error) => {
+                self.find.status = error;
+                return;
+            }
+        };
+        if found.is_empty() {
+            self.find.status = "Aucune occurrence a remplacer".into();
+            return;
         }
-        self.find.status = format!("{count} remplacement(s).");
+        self.create_version("Avant remplacement global");
+        let replacement = self.find.replacement.clone();
+        let mut removed = 0;
+        let tab = self.active_tab_mut();
+        for m in found.iter().rev() {
+            removed += tab.doc.text[m.start..m.end].chars().count();
+            tab.doc.text.replace_range(m.start..m.end, &replacement);
+        }
+        tab.touch();
+        tab.doc.pending_selection = None;
+        if let Some((_, _, end)) = &mut self.find.scope {
+            *end = end.saturating_sub(removed) + found.len() * replacement.chars().count();
+        }
+        self.session_dirty = true;
+        self.find.status = format!(
+            "{} remplacement(s). Une version de recuperation a ete conservee.",
+            found.len()
+        );
     }
 
     fn goto_line(&mut self) {
@@ -2475,6 +2279,23 @@ impl NotepadApp {
     }
 
     fn handle_action(&mut self, ctx: &egui::Context, action: Action) {
+        if self.active_tab().workspace.read_only
+            && matches!(
+                action,
+                Action::Undo
+                    | Action::Redo
+                    | Action::DeleteSelection
+                    | Action::InsertDate
+                    | Action::Format(_)
+                    | Action::SetEncoding(_)
+                    | Action::ReopenEncoding(_)
+                    | Action::SetEol(_)
+            )
+        {
+            self.status =
+                "Cette page est en lecture seule. Déverrouillez-la dans Propriétés.".into();
+            return;
+        }
         match action {
             Action::New => self.new_tab(),
             Action::NewMoodboard => self.new_moodboard(),
@@ -2515,6 +2336,8 @@ impl NotepadApp {
                 }
             }
             Action::Find => {
+                let (a, b) = self.char_selection(ctx);
+                self.find.scope = (a < b).then_some((self.active_tab().doc.id, a, b));
                 self.show_find = true;
                 self.show_replace = false;
                 self.find.focus_needle = true;
@@ -2536,6 +2359,8 @@ impl NotepadApp {
                 }
             }
             Action::Replace => {
+                let (a, b) = self.char_selection(ctx);
+                self.find.scope = (a < b).then_some((self.active_tab().doc.id, a, b));
                 self.show_find = true;
                 self.show_replace = true;
                 self.find.focus_needle = true;
@@ -2556,25 +2381,43 @@ impl NotepadApp {
             }
             Action::SetEncoding(encoding) => {
                 let tab = self.active_tab_mut();
-                tab.doc.reinterpret(encoding);
-                tab.max_chars = tab
-                    .doc
-                    .text
-                    .lines()
-                    .map(|l| l.chars().count())
-                    .max()
-                    .unwrap_or(0);
-                tab.history = History::new(&tab.doc.text);
-                self.status = format!("Codage : {}", encoding.label());
+                if tab.doc.encoding != encoding {
+                    tab.doc.encoding = encoding;
+                    tab.doc.dirty = true;
+                }
+                self.status = format!(
+                    "Encodage à l’enregistrement : {}. Texte conservé.",
+                    encoding.label()
+                );
+            }
+            Action::ReopenEncoding(encoding) => {
+                if self.active_tab().doc.dirty {
+                    self.status = "Réouverture refusée : enregistrez le brouillon ou créez une copie avant de relire le fichier.".into();
+                } else if self.active_tab().doc.raw.is_some() {
+                    let tab = self.active_tab_mut();
+                    tab.doc.reinterpret(encoding);
+                    tab.history = History::new(&tab.doc.text);
+                    tab.max_chars = tab
+                        .doc
+                        .text
+                        .lines()
+                        .map(|l| l.chars().count())
+                        .max()
+                        .unwrap_or(0);
+                    self.status = format!("Fichier rouvert avec {}", encoding.label());
+                }
             }
             Action::SetEol(eol) => {
-                self.active_tab_mut().doc.eol = eol;
+                let doc = &mut self.active_tab_mut().doc;
+                if doc.eol != eol {
+                    doc.eol = eol;
+                    doc.dirty = true;
+                }
                 self.status = format!("Fin de ligne : {}", eol.label());
             }
             Action::ToggleWrap => {
                 let tab = self.active_tab_mut();
                 tab.doc.wrap = !tab.doc.wrap;
-                self.default_wrap = tab.doc.wrap;
             }
             Action::SetTheme(mode) => {
                 self.theme = mode;
@@ -2644,6 +2487,7 @@ impl NotepadApp {
                 let enabled = tab.doc.markdown;
                 if !enabled {
                     self.show_markdown_preview = false;
+                    self.active_tab_mut().workspace.visual_blocks = false;
                 }
                 self.status = if enabled {
                     "Mode Markdown activé.".to_string()
@@ -2677,6 +2521,39 @@ impl NotepadApp {
     fn shortcuts(&mut self, ctx: &egui::Context) -> Vec<Action> {
         use egui::Key;
         let mut actions = Vec::new();
+        ctx.input_mut(|input| {
+            let shift = egui::Modifiers {
+                command: true,
+                shift: true,
+                ..Default::default()
+            };
+            for (id, binding) in self.preferences.shortcuts.clone() {
+                if let Some((modifiers, key)) = settings::shortcut(&binding) {
+                    if input.consume_key(modifiers, key) {
+                        match id.as_str() {
+                            "settings" => self.design.settings = true,
+                            "palette" => self.open_palette(),
+                            "search" => self.options.search = true,
+                            "history" => self.options.history = true,
+                            "focus" => self.options.concentration = !self.options.concentration,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            if input.consume_key(egui::Modifiers::COMMAND, Key::Comma) {
+                self.design.settings = !self.design.settings;
+            }
+            if input.consume_key(shift, Key::P) {
+                self.open_palette();
+            }
+            if input.consume_key(shift, Key::F) {
+                self.options.search = true;
+            }
+            if input.consume_key(egui::Modifiers::NONE, Key::Escape) {
+                self.options.concentration = false;
+            }
+        });
         // « Mise en page » est modal : tant qu'elle est ouverte, aucun
         // raccourci du document ne doit s'appliquer (Ctrl+A, Ctrl+Z, F5...).
         if self.show_page_setup {
@@ -2775,203 +2652,9 @@ impl NotepadApp {
     }
 
     fn menu_bar(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        let wrap = self.active_tab().doc.wrap;
-        let theme = self.theme;
-        let status_bar = self.status_bar;
-        let markdown = self.active_tab().doc.markdown;
-        let markdown_preview = self.show_markdown_preview;
-        let format_bar = self.show_format_bar;
-        ui.horizontal(|ui| {
-            ui.menu_button("Fichier", |ui| {
-                if ui.button("Nouvel onglet       Ctrl+N").clicked() {
-                    actions.push(Action::New);
-                    ui.close();
-                }
-                if ui.button("Nouveau moodboard").clicked() {
-                    actions.push(Action::NewMoodboard);
-                    ui.close();
-                }
-                if ui.button("Nouvelle fenêtre    Ctrl+Maj+N").clicked() {
-                    actions.push(Action::NewWindow);
-                    ui.close();
-                }
-                if ui.button("Ouvrir...           Ctrl+O").clicked() {
-                    actions.push(Action::Open(None));
-                    ui.close();
-                }
-                self.recent_menu(ui, actions);
-                ui.separator();
-                if ui.button("Enregistrer         Ctrl+S").clicked() {
-                    actions.push(Action::Save);
-                    ui.close();
-                }
-                if ui.button("Enregistrer sous    Ctrl+Maj+S").clicked() {
-                    actions.push(Action::SaveAs);
-                    ui.close();
-                }
-                if ui.button("Tout enregistrer").clicked() {
-                    actions.push(Action::SaveAll);
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Mise en page...").clicked() {
-                    actions.push(Action::PageSetup);
-                    ui.close();
-                }
-                if ui.button("Imprimer...        Ctrl+P").clicked() {
-                    actions.push(Action::Print);
-                    ui.close();
-                }
-                if ui.button("Aperçu avant impression").clicked() {
-                    actions.push(Action::PrintPreview);
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Fermer l'onglet     Ctrl+W").clicked() {
-                    actions.push(Action::CloseTab);
-                    ui.close();
-                }
-                if ui.button("Fermer la fenêtre   Ctrl+Maj+W").clicked() {
-                    actions.push(Action::CloseWindow);
-                    ui.close();
-                }
-                if ui.button("Quitter").clicked() {
-                    actions.push(Action::Quit);
-                    ui.close();
-                }
-            });
-            ui.menu_button("Édition", |ui| {
-                if ui.button("Annuler          Ctrl+Z").clicked() {
-                    actions.push(Action::Undo);
-                    ui.close();
-                }
-                if ui.button("Rétablir         Ctrl+Y").clicked() {
-                    actions.push(Action::Redo);
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Couper           Ctrl+X").clicked() {
-                    actions.push(Action::Cut);
-                    ui.close();
-                }
-                if ui.button("Copier           Ctrl+C").clicked() {
-                    actions.push(Action::Copy);
-                    ui.close();
-                }
-                if ui.button("Coller           Ctrl+V").clicked() {
-                    actions.push(Action::Paste);
-                    ui.close();
-                }
-                if ui.button("Supprimer        Suppr").clicked() {
-                    actions.push(Action::DeleteSelection);
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Rechercher...    Ctrl+F").clicked() {
-                    actions.push(Action::Find);
-                    ui.close();
-                }
-                if ui.button("Rechercher suivant   F3").clicked() {
-                    actions.push(Action::FindNext);
-                    ui.close();
-                }
-                if ui.button("Rechercher précédent Maj+F3").clicked() {
-                    actions.push(Action::FindPrevious);
-                    ui.close();
-                }
-                if ui.button("Remplacer...     Ctrl+H").clicked() {
-                    actions.push(Action::Replace);
-                    ui.close();
-                }
-                if ui.button("Atteindre...     Ctrl+G").clicked() {
-                    actions.push(Action::Goto);
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Tout sélectionner Ctrl+A").clicked() {
-                    actions.push(Action::SelectAll);
-                    ui.close();
-                }
-                if ui.button("Heure/Date       F5").clicked() {
-                    actions.push(Action::InsertDate);
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Police...").clicked() {
-                    actions.push(Action::Font);
-                    ui.close();
-                }
-            });
-            ui.menu_button("Affichage", |ui| {
-                ui.menu_button("Zoom", |ui| {
-                    if ui.button("Zoom avant      Ctrl++").clicked() {
-                        actions.push(Action::Zoom(1));
-                        ui.close();
-                    }
-                    if ui.button("Zoom arrière    Ctrl+-").clicked() {
-                        actions.push(Action::Zoom(-1));
-                        ui.close();
-                    }
-                    if ui.button("Zoom par défaut Ctrl+0").clicked() {
-                        actions.push(Action::ResetZoom);
-                        ui.close();
-                    }
-                });
-                let mut wrap_checked = wrap;
-                if ui
-                    .checkbox(&mut wrap_checked, "Retour à la ligne")
-                    .clicked()
-                {
-                    actions.push(Action::ToggleWrap);
-                    ui.close();
-                }
-                let mut status_checked = status_bar;
-                if ui.checkbox(&mut status_checked, "Barre d'état").clicked() {
-                    actions.push(Action::ToggleStatus);
-                    ui.close();
-                }
-                ui.separator();
-                let mut markdown_checked = markdown;
-                if ui.checkbox(&mut markdown_checked, "Markdown").clicked() {
-                    actions.push(Action::ToggleMarkdown);
-                    ui.close();
-                }
-                let mut preview_checked = markdown_preview;
-                if ui
-                    .checkbox(&mut preview_checked, "Aperçu Markdown   Ctrl+Maj+M")
-                    .clicked()
-                {
-                    actions.push(Action::ToggleMarkdownPreview);
-                    ui.close();
-                }
-                let mut bar_checked = format_bar;
-                if ui
-                    .checkbox(&mut bar_checked, "Barre de mise en forme")
-                    .clicked()
-                {
-                    actions.push(Action::ToggleFormatBar);
-                    ui.close();
-                }
-                ui.menu_button("Thème", |ui| {
-                    for mode in [ThemeMode::System, ThemeMode::Light, ThemeMode::Dark] {
-                        if ui.selectable_label(theme == mode, mode.label()).clicked() {
-                            actions.push(Action::SetTheme(mode));
-                            ui.close();
-                        }
-                    }
-                });
-            });
-            ui.menu_button("Aide", |ui| {
-                if ui.button("À propos de Notepad RS").clicked() {
-                    actions.push(Action::About);
-                    ui.close();
-                }
-            });
-            self.workspace_menu_items(ui, actions);
-        });
+        self.catalog_menu_bar(ui, actions);
     }
 
-    /// Sous-menu « Fichiers recents » du menu Fichier.
     fn recent_menu(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.menu_button("Fichiers récents", |ui| {
             if self.recent.is_empty() {
@@ -3199,6 +2882,10 @@ impl eframe::App for NotepadApp {
                 })
                 .unwrap_or(false);
             if self.active_tab().doc.moodboard && is_image {
+                if self.active_tab().workspace.read_only {
+                    self.status = "Import refusé : moodboard en lecture seule".into();
+                    continue;
+                }
                 let n = self.active_tab().mood_items.len() as f32;
                 self.active_tab_mut().mood_items.push(session::MoodItem {
                     text: String::new(),
@@ -3210,6 +2897,7 @@ impl eframe::App for NotepadApp {
                     color: 0,
                     link: None,
                     embedded_image: None,
+                    ..Default::default()
                 });
                 self.active_tab_mut().doc.dirty = true;
                 self.session_dirty = true;
@@ -3304,6 +2992,30 @@ impl eframe::App for NotepadApp {
                     ui.checkbox(&mut self.find.match_case, "Respecter la casse");
                     ui.checkbox(&mut self.find.wrap, "Boucler");
                 });
+                ui.horizontal_wrapped(|ui| {
+                    ui.checkbox(&mut self.find.whole_words, "Mots entiers");
+                    ui.checkbox(&mut self.find.regex, "Expression régulière");
+                    ui.add_enabled(
+                        self.find
+                            .scope
+                            .is_some_and(|(id, _, _)| id == self.active_tab().doc.id),
+                        egui::Checkbox::new(
+                            &mut self.find.selection_only,
+                            "Dans la sélection initiale",
+                        ),
+                    );
+                });
+                match self.find_matches() {
+                    Ok(found) => {
+                        ui.label(format!(
+                            "{} occurrence(s) — le remplacement est littéral",
+                            found.len()
+                        ));
+                    }
+                    Err(error) => {
+                        ui.colored_label(egui::Color32::RED, error);
+                    }
+                }
                 ui.horizontal(|ui| {
                     if ui.button("Suivant").clicked() {
                         self.find_next(false);
@@ -3430,7 +3142,8 @@ impl eframe::App for NotepadApp {
                     Some(chosen.clone())
                 };
                 self.active_tab_mut().doc.font_size = size;
-                self.default_font_size = size;
+                // Font size is a page override; new-page defaults live in Settings.
+                self.session_dirty = true;
                 if let Some(name) = self.font_family.clone() {
                     self.ensure_font(&ctx, &name);
                 }
@@ -3444,6 +3157,7 @@ impl eframe::App for NotepadApp {
         }
 
         self.page_setup_window(&ctx);
+        self.options_ui(&ctx);
 
         self.close_dialogs_ui(&ctx);
 
@@ -3469,6 +3183,7 @@ impl eframe::App for NotepadApp {
         self.capture_preview(&ctx);
         if self.design.capture.is_none() && !self.close_confirmed && !self.pending_quit {
             self.sync_workspace(&ctx);
+            self.scheduled_backup(&ctx);
         }
         if self.close_requested {
             self.close_requested = false;
@@ -3828,12 +3543,6 @@ fn char_to_byte(text: &str, char_index: usize) -> usize {
         .nth(char_index)
         .map(|(offset, _)| offset)
         .unwrap_or(text.len())
-}
-
-fn byte_offsets(text: &str) -> impl Iterator<Item = usize> + '_ {
-    text.char_indices()
-        .map(|(offset, _)| offset)
-        .chain(std::iter::once(text.len()))
 }
 
 /// Demande la fermeture des autres fenetres Notepad RS (« Quitter »).

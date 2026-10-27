@@ -111,6 +111,14 @@ pub struct SessionTab {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PageOptions {
+    pub canvas_appearance: CanvasAppearance,
+    pub disk_hash: Option<u64>,
+    pub conflict_of: Option<String>,
+    pub trashed_at: Option<String>,
+    pub reading_width: Option<f32>,
+    pub read_only: bool,
+    pub modified_at: String,
+    pub snapshots: Vec<PageVersion>,
     /// None keeps the legacy free canvas; dimensions are logical pixels.
     pub canvas_size: Option<[u32; 2]>,
     pub uid: String,
@@ -127,6 +135,12 @@ pub struct PageOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MoodItem {
+    #[serde(default)]
+    pub locked: bool,
+    #[serde(default)]
+    pub hidden: bool,
+    #[serde(default)]
+    pub keep_ratio: bool,
     pub text: String,
     pub image_path: Option<String>,
     pub x: f32,
@@ -142,6 +156,9 @@ pub struct MoodItem {
 impl Default for MoodItem {
     fn default() -> Self {
         Self {
+            locked: false,
+            hidden: false,
+            keep_ratio: false,
             text: "Note".into(),
             image_path: None,
             x: 80.0,
@@ -213,10 +230,25 @@ pub fn window_session_path(process_id: u32) -> PathBuf {
 
 impl Session {
     pub fn load_from(path: &Path) -> Session {
-        let Ok(bytes) = std::fs::read(path) else {
-            return Session::default();
-        };
-        serde_json::from_slice(&bytes).unwrap_or_default()
+        Self::load_report(path).0
+    }
+
+    pub fn load_report(path: &Path) -> (Session, Option<String>) {
+        match std::fs::read(path)
+            .and_then(|bytes| serde_json::from_slice(&bytes).map_err(std::io::Error::other))
+        {
+            Ok(session) => (session, None),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                (Session::default(), None)
+            }
+            Err(error) => {
+                let backup = path.with_extension("json.bak");
+                match std::fs::read(&backup).ok().and_then(|b| serde_json::from_slice(&b).ok()) {
+                    Some(session) => (session, Some(format!("Session récupérée depuis la sauvegarde .bak. Le fichier original est conservé. Erreur : {error}"))),
+                    None => (Session::default(), Some(format!("Session illisible : {error}. Aucun contenu n’a été supprimé ; importez une sauvegarde depuis Paramètres > Sauvegardes."))),
+                }
+            }
+        }
     }
 
     pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
@@ -228,7 +260,21 @@ impl Session {
         let temp = path.with_extension("json.tmp");
         std::fs::write(&temp, json)?;
         if path.exists() {
-            std::fs::copy(path, path.with_extension("json.bak"))?;
+            if std::fs::read(path)
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Session>(&b).ok())
+                .is_some()
+            {
+                std::fs::copy(path, path.with_extension("json.bak"))?;
+            } else {
+                std::fs::copy(
+                    path,
+                    path.with_extension(format!(
+                        "{}.corrupt",
+                        chrono::Utc::now().timestamp_micros()
+                    )),
+                )?;
+            }
         }
         // `rename` remplace le fichier existant sous Windows depuis Rust 1.26.
         std::fs::rename(&temp, &path)
@@ -238,10 +284,14 @@ impl Session {
 /// Place `path` en tete des recents (dedoublonnage insensible a la casse,
 /// 10 entrees maximum).
 pub fn touch_recent_list(list: &mut Vec<String>, path: &Path) {
+    touch_recent_list_with_limit(list, path, RECENT_LIMIT);
+}
+
+pub fn touch_recent_list_with_limit(list: &mut Vec<String>, path: &Path, limit: usize) {
     let text = path.to_string_lossy().to_string();
     list.retain(|entry| !entry.eq_ignore_ascii_case(&text));
     list.insert(0, text);
-    list.truncate(RECENT_LIMIT);
+    list.truncate(limit.clamp(1, 100));
 }
 
 pub fn clear_recent_list(list: &mut Vec<String>) {
@@ -360,17 +410,105 @@ mod tests {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NotepadPreferences {
     pub recent_enabled: bool,
     pub open_new_window: bool,
+    pub recent_limit: usize,
+    pub start_blank: bool,
+    pub default_kind: u8,
+    pub default_encoding: u8,
+    pub default_eol: u8,
+    pub reading_width: f32,
+    pub line_height: f32,
+    pub sync_seconds: u64,
+    pub grid: bool,
+    pub snap: bool,
+    pub grid_size: f32,
+    pub version_limit: usize,
+    pub automatic_versions: bool,
+    pub version_seconds: u64,
+    pub backup_directory: Option<String>,
+    pub backup_minutes: u64,
+    pub templates: Vec<Template>,
+    pub shortcuts: std::collections::BTreeMap<String, String>,
 }
 impl Default for NotepadPreferences {
     fn default() -> Self {
         Self {
             recent_enabled: true,
             open_new_window: false,
+            recent_limit: 10,
+            start_blank: false,
+            default_kind: 0,
+            default_encoding: 1,
+            default_eol: 0,
+            reading_width: 540.0,
+            line_height: 1.3,
+            sync_seconds: 5,
+            grid: true,
+            snap: false,
+            grid_size: 24.0,
+            version_limit: 50,
+            automatic_versions: true,
+            version_seconds: 30,
+            backup_directory: None,
+            backup_minutes: 15,
+            templates: Vec::new(),
+            shortcuts: Default::default(),
         }
     }
+}
+
+impl NotepadPreferences {
+    pub fn sanitize(&mut self) {
+        self.recent_limit = self.recent_limit.clamp(1, 100);
+        self.default_kind = self.default_kind.min(2);
+        self.default_encoding = self.default_encoding.min(4);
+        self.default_eol = self.default_eol.min(2);
+        if !self.reading_width.is_finite() {
+            self.reading_width = 540.0;
+        }
+        self.reading_width = self.reading_width.clamp(300.0, 2400.0);
+        if !self.line_height.is_finite() {
+            self.line_height = 1.3;
+        }
+        self.line_height = self.line_height.clamp(1.0, 2.5);
+        self.sync_seconds = self.sync_seconds.clamp(5, 3600);
+        if !self.grid_size.is_finite() {
+            self.grid_size = 24.0;
+        }
+        self.grid_size = self.grid_size.clamp(8.0, 200.0);
+        self.version_limit = self.version_limit.clamp(1, 200);
+        self.version_seconds = self.version_seconds.clamp(30, 3600);
+        self.backup_minutes = self.backup_minutes.clamp(1, 1440);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Template {
+    pub name: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageVersion {
+    pub created_at: String,
+    pub label: String,
+    pub text: String,
+    pub mood_items: Vec<MoodItem>,
+    pub canvas_size: Option<[u32; 2]>,
+}
+
+/// Per-board presentation; None inherits the existing application preference.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CanvasAppearance {
+    pub background: Option<[u8; 3]>,
+    pub grid: Option<bool>,
+    pub grid_size: Option<f32>,
+    pub snap: Option<bool>,
+    pub lines: bool,
+    pub hide_border: bool,
 }

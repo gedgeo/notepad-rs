@@ -10,6 +10,54 @@ pub struct Match {
     pub end: usize,
 }
 
+/// Advanced search uses Unicode boundaries and returns byte offsets in the source.
+pub fn occurrences(
+    text: &str,
+    needle: &str,
+    match_case: bool,
+    whole_words: bool,
+    regex: bool,
+) -> Result<Vec<Match>, String> {
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !regex && !whole_words {
+        let mut found = Vec::new();
+        let mut from = 0;
+        while let Some(m) = find_from(text, needle, from, match_case) {
+            from = m.end;
+            found.push(m);
+            if from >= text.len() {
+                break;
+            }
+        }
+        return Ok(found);
+    }
+    let pattern = if regex {
+        needle.to_owned()
+    } else {
+        regex::escape(needle)
+    };
+    let pattern = if whole_words {
+        format!(r"\b(?:{pattern})\b")
+    } else {
+        pattern
+    };
+    let compiled = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(!match_case)
+        .size_limit(4 * 1024 * 1024)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(compiled
+        .find_iter(text)
+        .filter(|m| m.start() != m.end())
+        .map(|m| Match {
+            start: m.start(),
+            end: m.end(),
+        })
+        .collect())
+}
+
 impl Match {
     // Utilise par les tests et par l'interface (longueur de la selection).
     #[allow(dead_code)]
@@ -89,6 +137,7 @@ pub fn find_from(hay: &str, needle: &str, from: usize, match_case: bool) -> Opti
 }
 
 /// Recherche vers l'avant avec bouclage optionnel (case « Boucler »).
+#[cfg(test)]
 pub fn find_next(
     hay: &str,
     needle: &str,
@@ -106,6 +155,7 @@ pub fn find_next(
 }
 
 /// Recherche vers l'arriere avec bouclage optionnel.
+#[cfg(test)]
 pub fn find_previous(
     hay: &str,
     needle: &str,
@@ -140,6 +190,7 @@ pub fn find_previous(
 
 /// Remplace toutes les occurrences et renvoie le texte obtenu + le nombre de
 /// remplacements effectues.
+#[cfg(test)]
 pub fn replace_all(
     hay: &str,
     needle: &str,

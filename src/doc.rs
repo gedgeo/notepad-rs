@@ -165,6 +165,10 @@ impl Doc {
 
     /// Reinterprete les octets d'origine avec un nouveau codage.
     pub fn reinterpret(&mut self, encoding: Encoding) {
+        // Never discard an unsaved buffer when reopening original bytes.
+        if self.dirty {
+            return;
+        }
         self.encoding = encoding;
         if let Some(raw) = &self.raw {
             let decoded = encoding.decode(raw);

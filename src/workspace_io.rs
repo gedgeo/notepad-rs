@@ -30,7 +30,12 @@ pub fn portable(mut session: Session) -> io::Result<Session> {
     session.sync_baseline.clear();
     session.sync_directory = None;
     for page in &mut session.tabs {
-        for item in &mut page.mood_items {
+        for item in page.mood_items.iter_mut().chain(
+            page.workspace
+                .snapshots
+                .iter_mut()
+                .flat_map(|v| v.mood_items.iter_mut()),
+        ) {
             if let Some(path) = &item.image_path {
                 let metadata = std::fs::metadata(path)?;
                 if metadata.len() > 32 * 1024 * 1024 {
@@ -47,7 +52,12 @@ pub fn portable(mut session: Session) -> io::Result<Session> {
 }
 
 pub fn materialize(page: &mut SessionTab, dir: &Path) -> io::Result<()> {
-    for item in &mut page.mood_items {
+    for item in page.mood_items.iter_mut().chain(
+        page.workspace
+            .snapshots
+            .iter_mut()
+            .flat_map(|v| v.mood_items.iter_mut()),
+    ) {
         if let Some(bytes) = &item.embedded_image {
             // Decode before writing: an imported attachment must really be an image.
             image::load_from_memory(bytes).map_err(io::Error::other)?;
@@ -67,7 +77,13 @@ fn content(page: &SessionTab) -> Vec<u8> {
     page.cursor = 0;
     page.dirty = false;
     page.path = None;
-    for item in &mut page.mood_items {
+    page.workspace.disk_hash = None;
+    for item in page.mood_items.iter_mut().chain(
+        page.workspace
+            .snapshots
+            .iter_mut()
+            .flat_map(|v| v.mood_items.iter_mut()),
+    ) {
         if item.embedded_image.is_some() {
             item.image_path = None;
         }
@@ -124,6 +140,7 @@ pub fn merge(local: &Session, remote: &Session, base: &[SessionTab]) -> (Session
             } else if !remote_unchanged {
                 incoming.page_id = next;
                 next += 1;
+                incoming.workspace.conflict_of = Some(incoming.workspace.uid.clone());
                 incoming.workspace.uid = uid();
                 incoming.page_title = format!("{} — conflit", incoming.page_title);
                 incoming.dirty = true;
@@ -189,6 +206,10 @@ mod tests {
         assert_eq!(merged.tabs.len(), 2);
         assert_eq!(merged.tabs[0].text.as_deref(), Some("local"));
         assert_eq!(merged.tabs[1].text.as_deref(), Some("remote"));
+        assert_eq!(
+            merged.tabs[1].workspace.conflict_of.as_ref(),
+            Some(&merged.tabs[0].workspace.uid)
+        );
     }
     #[test]
     fn remote_only_edit_updates_without_duplicate() {

@@ -114,6 +114,9 @@ impl NotepadApp {
     }
 
     pub(crate) fn close_dialogs_ui(&mut self, ctx: &egui::Context) {
+        if self.options.external_write.is_some() {
+            return;
+        }
         if self.quit_save_pending && self.pending_ansi_save.is_none() {
             self.save_before_window_close(ctx);
         }

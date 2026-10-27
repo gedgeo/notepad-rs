@@ -20,6 +20,7 @@ pub struct State {
     pub sidebar_width: f32,
     pub mobile_navigation: bool,
     pub inspector: bool,
+    pub inspector_section: Option<&'static str>,
     pub settings: bool,
     pub trash: bool,
     pub rename: Option<u64>,
@@ -28,6 +29,8 @@ pub struct State {
     pub board_zoom: f32,
     pub board_pan: egui::Vec2,
     pub board_hand: bool,
+    pub board_fit_requested: bool,
+    pub board_import_requested: bool,
     pub textures: HashMap<String, egui::TextureHandle>,
     pub selected_block: Option<usize>,
     pub capture: Option<(String, String, u32)>,
@@ -39,6 +42,7 @@ impl Default for State {
             sidebar_width: 256.0,
             mobile_navigation: false,
             inspector: false,
+            inspector_section: None,
             settings: false,
             trash: false,
             rename: None,
@@ -47,6 +51,8 @@ impl Default for State {
             board_zoom: 1.0,
             board_pan: egui::Vec2::ZERO,
             board_hand: false,
+            board_fit_requested: false,
+            board_import_requested: false,
             textures: HashMap::new(),
             selected_block: None,
             capture: None,
@@ -138,15 +144,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("Menu absent : {label}"))
         };
         let first = locate(&output, "Fichier");
-        for label in [
-            "Édition",
-            "Affichage",
-            "Aide",
-            "Onglets",
-            "Page",
-            "Espace",
-            "Interface",
-        ] {
+        for label in ["Édition", "Affichage", "Aide", "Page"] {
             let p = locate(&output, label);
             assert!(
                 (p.y - first.y).abs() < 3.0,
@@ -349,57 +347,7 @@ impl NotepadApp {
             });
     }
 
-    pub(crate) fn workspace_menu_items(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        let ctx = ui.ctx().clone();
-        ui.separator();
-        if ctx.content_rect().width() < 760.0 {
-            ui.menu_button("Outils", |ui| {
-                self.page_menu_items(ui);
-                ui.separator();
-                ui.menu_button("Onglets ouverts", |ui| self.tab_strip(ui, actions));
-                if ui.button("Historique et paramètres…").clicked() {
-                    self.design.settings = true;
-                    ui.close();
-                }
-                ui.menu_button("Interface", |ui| self.interface_menu_items(ui, &ctx));
-            });
-        } else {
-            ui.menu_button("Onglets", |ui| self.tab_strip(ui, actions));
-            ui.menu_button("Page", |ui| self.page_menu_items(ui));
-            ui.menu_button("Espace", |ui| {
-                if ui.button("Historique et paramètres…").clicked() {
-                    self.design.settings = true;
-                    ui.close();
-                }
-                if ui.button("Corbeille").clicked() {
-                    self.design.trash = true;
-                    ui.close();
-                }
-            });
-            ui.menu_button("Interface", |ui| self.interface_menu_items(ui, &ctx));
-        }
-    }
-
-    fn page_menu_items(&mut self, ui: &mut egui::Ui) {
-        if ui.button("Propriétés de la page").clicked() {
-            self.design.inspector = !self.design.inspector;
-            ui.close();
-        }
-        if ui.button("Renommer la page").clicked() {
-            self.design.rename = Some(self.active_tab().doc.id);
-            self.design.rename_draft = page_title(self.active_tab());
-            self.design.sidebar = true;
-            self.design.mobile_navigation = true;
-            ui.close();
-        }
-        let mut favorite = self.active_tab().workspace.favorite;
-        if ui.checkbox(&mut favorite, "Ajouter aux favoris").changed() {
-            self.active_tab_mut().workspace.favorite = favorite;
-            self.session_dirty = true;
-        }
-    }
-
-    fn interface_menu_items(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    pub(crate) fn interface_menu_items(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if ui
             .checkbox(&mut self.design.sidebar, "Navigation des pages")
             .changed()
@@ -432,14 +380,17 @@ impl NotepadApp {
             )
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    let label = if self.session_dirty {
-                        "Enregistrement de la session…"
+                    let label = if self.options.save_error.is_some() {
+                        "Erreur de sauvegarde locale — ouvrir Paramètres"
+                    } else if self.session_dirty {
+                        "Brouillon local : enregistrement en attente…"
                     } else {
-                        "Enregistré sur cet appareil"
+                        "Brouillon conservé localement"
                     };
                     ui.label(
                         egui::RichText::new(format!("{}  {label}", icons::CHECK_CIRCLE)).size(13.0),
                     );
+                    ui.label(if self.active_tab().doc.path.is_none() { "Fichier : non associé" } else if self.active_tab().doc.dirty { "Fichier : modifications non enregistrées" } else { "Fichier : enregistré" });
                     if !self.active_tab().doc.moodboard {
                         let doc = &self.active_tab().doc;
                         let total = doc.text.chars().count();
@@ -477,6 +428,7 @@ impl NotepadApp {
                                 let encoding = tab.doc.encoding;
                                 let eol = tab.doc.eol;
                                 ui.separator();
+                                ui.label("Encodage du prochain enregistrement (texte conservé)");
                                 for choice in ENCODINGS {
                                     if ui
                                         .selectable_label(choice == encoding, choice.label())
@@ -486,6 +438,11 @@ impl NotepadApp {
                                         ui.close();
                                     }
                                 }
+                                ui.menu_button("Rouvrir les octets d’origine avec…", |ui| {
+                                    let allowed = !self.active_tab().doc.dirty && self.active_tab().doc.raw.is_some();
+                                    if !allowed { ui.label("Enregistrez le brouillon avant de rouvrir les octets du fichier."); }
+                                    for choice in ENCODINGS { if ui.add_enabled(allowed, egui::Button::new(choice.label())).clicked() { actions.push(Action::ReopenEncoding(choice)); ui.close(); } }
+                                });
                                 ui.separator();
                                 for choice in EOL_ALL {
                                     if ui.selectable_label(choice == eol, choice.label()).clicked()
@@ -503,7 +460,7 @@ impl NotepadApp {
                         };
                         ui.label(egui::RichText::new(format!("{zoom:.0} %")).size(13.0));
                         if self.sync_directory.is_some() {
-                            ui.label(egui::RichText::new("Synchronisation activée").size(13.0));
+                            ui.label(egui::RichText::new(if self.options.sync_paused { "Synchronisation : en pause" } else if self.options.sync_error.is_some() { "Synchronisation : erreur" } else if self.options.last_sync.is_some() { "Synchronisation : dernière vérification réussie" } else { "Synchronisation : en attente" }).size(13.0));
                         }
                     });
                 });
@@ -517,7 +474,12 @@ impl NotepadApp {
         actions: &mut Vec<Action>,
     ) -> bool {
         let available = ui.available_width();
-        let width = available.min(540.0);
+        let width = available.min(
+            self.active_tab()
+                .workspace
+                .reading_width
+                .unwrap_or(self.preferences.reading_width),
+        );
         let margin = ((available - width) / 2.0).max(12.0);
         let mut typed = false;
         ui.horizontal_top(|ui| {
@@ -556,7 +518,12 @@ impl NotepadApp {
                     if self.active_tab().doc.markdown && self.show_format_bar {
                         self.format_bar(ui, actions);
                     }
-                    if self.active_tab().workspace.visual_blocks {
+                    if self.active_tab().workspace.read_only {
+                        ui.label("Lecture seule — déverrouiller dans Propriétés");
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            ui.label(&self.active_tab().doc.text);
+                        });
+                    } else if self.active_tab().workspace.visual_blocks {
                         let id = self.active_tab().doc.id;
                         typed = blocks::editor_selected(
                             ui,
@@ -584,12 +551,22 @@ impl NotepadApp {
     }
 
     pub(crate) fn moodboard_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if self.active_tab().workspace.read_only {
+            ui.label("Moodboard en lecture seule");
+            if ui.button("Autoriser les modifications").clicked() {
+                self.active_tab_mut().workspace.read_only = false;
+                self.session_dirty = true;
+            } else {
+                ui.disable();
+            }
+        }
         let current = self.active_tab().doc.id;
         if self.selected_mood_tab != Some(current) {
             self.selected_mood_tab = Some(current);
             self.selected_mood_item = None;
             self.design.board_pan = egui::Vec2::ZERO;
             self.design.board_zoom = 1.0;
+            self.design.inspector = true;
         }
         let before = serde_json::to_vec(&self.active_tab().mood_items).ok();
         let canvas_before = self.active_tab().workspace.canvas_size;
@@ -601,78 +578,26 @@ impl NotepadApp {
             )),
         );
         ui.add_space(12.0);
-        let mut import = false;
-        let mut fit = false;
+        let mut import = std::mem::take(&mut self.design.board_import_requested);
+        let fit = std::mem::take(&mut self.design.board_fit_requested);
         ui.horizontal_wrapped(|ui| {
             if ui
                 .add(primary(format!("{} Ajouter", icons::PLUS)))
                 .clicked()
             {
-                let n = self.active_tab().mood_items.len() as f32;
-                self.active_tab_mut().mood_items.push(session::MoodItem {
-                    text: "Nouvelle note".into(),
-                    x: 40.0 + n * 20.0,
-                    y: 40.0 + n * 20.0,
-                    ..Default::default()
-                });
-                self.selected_mood_item = Some(self.active_tab().mood_items.len() - 1);
+                self.execute_command(&ui.ctx().clone(), "board-note");
             }
-            import = ui.button(format!("{} Image…", icons::IMAGE)).clicked();
+            import |= ui.button(format!("{} Image…", icons::IMAGE)).clicked();
             ui.selectable_value(&mut self.design.board_hand, false, icons::CURSOR)
                 .on_hover_text("Sélectionner");
             ui.selectable_value(&mut self.design.board_hand, true, icons::HAND)
                 .on_hover_text("Déplacer le canevas");
-            ui.menu_button("Taille du canvas", |ui| {
-                let size = &mut self.tabs[self.active].workspace.canvas_size;
-                for (label, preset) in [
-                    ("Libre", None),
-                    ("Carré — 1080 × 1080", Some([1080, 1080])),
-                    ("Paysage — 1920 × 1080", Some([1920, 1080])),
-                    ("Portrait — 1080 × 1920", Some([1080, 1920])),
-                    ("A4 portrait — 794 × 1123", Some([794, 1123])),
-                ] {
-                    if ui.selectable_label(*size == preset, label).clicked() {
-                        *size = preset;
-                        fit = true;
-                        ui.close();
-                    }
-                }
-                ui.separator();
-                if ui.button("Personnalisée…").clicked() {
-                    *size = Some(size.unwrap_or([1920, 1080]));
-                }
-                if let Some([width, height]) = size {
-                    ui.horizontal(|ui| {
-                        ui.label("Largeur");
-                        if ui
-                            .add(egui::DragValue::new(width).range(100..=16384).suffix(" px"))
-                            .changed()
-                        {
-                            fit = true;
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Hauteur");
-                        if ui
-                            .add(
-                                egui::DragValue::new(height)
-                                    .range(100..=16384)
-                                    .suffix(" px"),
-                            )
-                            .changed()
-                        {
-                            fit = true;
-                        }
-                    });
-                    if ui.button("Permuter largeur / hauteur").clicked() {
-                        std::mem::swap(width, height);
-                        fit = true;
-                    }
-                }
-                ui.label("Les éléments restent conservés hors du cadre.");
-            });
+            if ui.button("Propriétés du moodboard").clicked() {
+                self.design.inspector = true;
+                self.design.inspector_section = Some("Canevas");
+            }
             if let Some([w, h]) = self.active_tab().workspace.canvas_size {
-                ui.weak(format!("{w} × {h} px"));
+                ui.colored_label(secondary(ui), format!("{w} × {h} px"));
             }
         });
         ui.add_space(12.0);
@@ -696,6 +621,7 @@ impl NotepadApp {
         let (canvas, painter) =
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         let rect = canvas.rect;
+        let appearance = self.active_tab().workspace.canvas_appearance.clone();
         let fill = if ui.visuals().dark_mode {
             egui::Color32::from_gray(28)
         } else {
@@ -732,31 +658,62 @@ impl NotepadApp {
         }
         let zoom = self.design.board_zoom;
         let pan = self.design.board_pan;
+        let canvas_fill = appearance
+            .background
+            .map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
+            .unwrap_or(ui.visuals().panel_fill);
+        if self.active_tab().workspace.canvas_size.is_none() {
+            painter.rect_filled(rect, 0.0, canvas_fill);
+        }
         if let Some([w, h]) = self.active_tab().workspace.canvas_size {
             let bounds =
                 egui::Rect::from_min_size(rect.min + pan, egui::vec2(w as f32, h as f32) * zoom);
-            painter.rect_filled(bounds, 0.0, ui.visuals().panel_fill);
-            painter.rect_stroke(
-                bounds,
-                0.0,
-                egui::Stroke::new(2.0, BLUE),
-                egui::StrokeKind::Inside,
-            );
+            painter.rect_filled(bounds, 0.0, canvas_fill);
+            if !appearance.hide_border {
+                painter.rect_stroke(
+                    bounds,
+                    0.0,
+                    egui::Stroke::new(2.0, BLUE),
+                    egui::StrokeKind::Inside,
+                );
+            }
         }
         let dot = if ui.visuals().dark_mode {
             egui::Color32::from_gray(65)
         } else {
             egui::Color32::from_rgb(204, 213, 226)
         };
-        let step = (24.0 * zoom).max(12.0);
+        let grid_size = appearance
+            .grid_size
+            .unwrap_or(self.preferences.grid_size)
+            .clamp(8.0, 200.0);
+        let step = (grid_size * zoom).max(8.0);
         let mut x = rect.left() + pan.x.rem_euclid(step);
-        while x < rect.right() {
+        while appearance.grid.unwrap_or(self.preferences.grid) && x < rect.right() {
             let mut y = rect.top() + pan.y.rem_euclid(step);
             while y < rect.bottom() {
-                painter.circle_filled(egui::pos2(x, y), 0.8, dot);
+                if !appearance.lines {
+                    painter.circle_filled(egui::pos2(x, y), 0.8, dot);
+                }
                 y += step;
             }
+            if appearance.lines {
+                painter.line_segment(
+                    [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+                    egui::Stroke::new(0.5, dot),
+                );
+            }
             x += step;
+        }
+        if appearance.lines && appearance.grid.unwrap_or(self.preferences.grid) {
+            let mut y = rect.top() + pan.y.rem_euclid(step);
+            while y < rect.bottom() {
+                painter.line_segment(
+                    [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+                    egui::Stroke::new(0.5, dot),
+                );
+                y += step;
+            }
         }
         if self.active_tab().mood_items.is_empty() {
             painter.text(
@@ -769,6 +726,9 @@ impl NotepadApp {
         }
         let mut selected = None;
         for i in 0..self.tabs[self.active].mood_items.len() {
+            if self.tabs[self.active].mood_items[i].hidden {
+                continue;
+            }
             let path = self.tabs[self.active].mood_items[i].image_path.clone();
             if let Some(path) = &path {
                 if !self.design.textures.contains_key(path) {
@@ -795,6 +755,8 @@ impl NotepadApp {
                 .map(|t| t.id());
             let active = self.selected_mood_item == Some(i);
             let hand = self.design.board_hand;
+            let page_locked = self.active_tab().workspace.read_only;
+            let snap = appearance.snap.unwrap_or(self.preferences.snap);
             let item = &mut self.tabs[self.active].mood_items[i];
             let size = egui::vec2(item.width, item.height) * zoom;
             egui::Area::new(egui::Id::unique(("board-item", current, i)))
@@ -834,6 +796,7 @@ impl NotepadApp {
                             );
                             ui.add(
                                 egui::TextEdit::multiline(&mut item.text)
+                                    .interactive(!item.locked && !page_locked)
                                     .font(egui::FontId::proportional(17.0 * zoom))
                                     .desired_width((size.x - 24.0).max(40.0))
                                     .desired_rows(3)
@@ -845,11 +808,15 @@ impl NotepadApp {
                             selected = Some(i);
                         }
                         if response.dragged() {
-                            if hand {
+                            if hand || item.locked || page_locked {
                             } else {
                                 item.x = (item.x + response.drag_delta().x / zoom).max(0.0);
                                 item.y = (item.y + response.drag_delta().y / zoom).max(0.0);
                             }
+                        }
+                        if response.drag_stopped() && snap && !item.locked && !page_locked {
+                            item.x = (item.x / grid_size).round() * grid_size;
+                            item.y = (item.y / grid_size).round() * grid_size;
                         }
                         if let Some(link) = &item.link {
                             if !link.is_empty() {
@@ -880,11 +847,15 @@ impl NotepadApp {
                             egui::Sense::drag(),
                         );
                         ui.painter().rect_filled(handle, 2.0, BLUE);
-                        if resize.dragged() {
+                        if resize.dragged() && !item.locked && !page_locked {
+                            let ratio = item.height / item.width.max(1.0);
                             item.width =
-                                (item.width + resize.drag_delta().x / zoom).clamp(100.0, 1600.0);
+                                (item.width + resize.drag_delta().x / zoom).clamp(20.0, 16384.0);
                             item.height =
-                                (item.height + resize.drag_delta().y / zoom).clamp(80.0, 1200.0);
+                                (item.height + resize.drag_delta().y / zoom).clamp(20.0, 16384.0);
+                            if item.keep_ratio {
+                                item.height = item.width * ratio;
+                            }
                         }
                     }
                 });
@@ -897,7 +868,7 @@ impl NotepadApp {
             .fixed_pos(rect.center_bottom() - egui::vec2(140.0, 48.0))
             .constrain(false)
             .movable(false)
-            .order(egui::Order::Foreground)
+            .order(egui::Order::Middle)
             .show(ctx, |ui| {
                 egui::Frame::group(ui.style())
                     .fill(ui.visuals().panel_fill)
@@ -1036,7 +1007,8 @@ impl NotepadApp {
                 self.active_tab_mut().workspace.canvas_size = Some([1920, 1080]);
             }
             self.selected_mood_tab = Some(self.active_tab().doc.id);
-            self.selected_mood_item = Some(0);
+            self.selected_mood_item = Some(if mode.contains("note-selection") { 3 } else { 0 });
+            if mode.contains("properties") { self.design.inspector_section=Some("Canevas"); }
             self.design.board_zoom = 0.8;
         }
         for tab in &mut self.tabs {
@@ -1045,6 +1017,23 @@ impl NotepadApp {
         if mode.starts_with("close-dialog") {
             self.active_tab_mut().doc.dirty = true;
             self.pending_quit = true;
+        }
+        if mode.starts_with("settings") {
+            self.design.settings = true;
+            self.options.category = if mode.contains("editor") {
+                2
+            } else if mode.contains("sync") {
+                6
+            } else {
+                0
+            };
+        }
+        if mode.starts_with("search") {
+            self.options.search = true;
+            self.page_search = "projet".into();
+        }
+        if mode.starts_with("palette") {
+            self.open_palette();
         }
         self.design.capture = Some((path.into(), mode.into(), 0));
         self.session_dirty = false;
@@ -1082,6 +1071,9 @@ impl NotepadApp {
     }
 
     pub(crate) fn navigation_ui(&mut self, ui: &mut egui::Ui) {
+        if self.options.concentration {
+            return;
+        }
         let narrow = ui.ctx().content_rect().width() < 800.0;
         if narrow && !self.design.mobile_navigation {
             return;
@@ -1099,12 +1091,12 @@ impl NotepadApp {
                     );
                     ui.menu_button("Nouvelle page", |ui| {
                         if ui.button("Texte").clicked() {
-                            self.new_tab();
+                            self.new_page_kind(0);
                             self.design.mobile_navigation = false;
                             ui.close();
                         }
                         if ui.button("Blocs").clicked() {
-                            self.new_tab();
+                            self.new_page_kind(1);
                             self.active_tab_mut().workspace.visual_blocks = true;
                             self.design.mobile_navigation = false;
                             ui.close();
@@ -1115,6 +1107,9 @@ impl NotepadApp {
                             ui.close();
                         }
                     });
+                    if ui.button("Recherche avancée et filtres…").clicked() {
+                        self.options.search = true;
+                    }
                     egui::ScrollArea::vertical()
                         .max_height((ctx.content_rect().height() - 240.0).max(120.0))
                         .show(ui, |ui| {
@@ -1158,17 +1153,21 @@ impl NotepadApp {
             .frame(egui::Frame::NONE.fill(fill).inner_margin(egui::Margin::same(16)))
             .show(ui, |ui| {
                 ui.add(egui::TextEdit::singleline(&mut self.page_search).hint_text("Rechercher").desired_width(f32::INFINITY).margin(egui::vec2(10.0, 10.0)));
+                if ui.button("Recherche avancée et filtres…").clicked() { self.options.search = true; }
                 ui.add_space(8.0);
                 ui.scope(|ui| {ui.spacing_mut().interact_size.x=ui.available_width();ui.style_mut().visuals.widgets.inactive.weak_bg_fill=BLUE;ui.style_mut().visuals.widgets.hovered.weak_bg_fill=egui::Color32::from_rgb(29,78,216);
                 ui.menu_button(egui::RichText::new(format!("{}  Nouvelle page", icons::PLUS)).color(egui::Color32::WHITE), |ui| {
                     ui.visuals_mut().override_text_color=Some(if ui.visuals().dark_mode{egui::Color32::WHITE}else{INK});
                     ui.spacing_mut().interact_size.x=40.0;
-                    if ui.button("Page texte").clicked() { self.new_tab(); ui.close(); }
-                    if ui.button("Page de blocs").clicked() { self.new_tab(); self.active_tab_mut().workspace.visual_blocks = true; self.active_tab_mut().doc.markdown = true; ui.close(); }
+                    if ui.button("Page texte").clicked() { self.new_page_kind(0); ui.close(); }
+                    if ui.button("Page de blocs").clicked() { self.new_page_kind(1); self.active_tab_mut().workspace.visual_blocks = true; self.active_tab_mut().doc.markdown = true; ui.close(); }
                     if ui.button("Moodboard").clicked() { self.new_moodboard(); ui.close(); }
                     ui.separator();
                     for (label, content) in [("Notes structurées", "## À retenir\n\n## Actions\n\n- [ ] À faire\n"), ("Projet", "## Objectif\n\nDécrire le projet.\n\n## Tâches\n\n- [ ] Première étape\n"), ("Réunion", "## Participants\n\n## Compte rendu\n\n## Décisions\n")] {
-                        if ui.button(label).clicked() { self.new_tab(); let t=self.active_tab_mut(); t.page_title=label.into(); t.doc.text=content.into(); t.doc.markdown=true; t.workspace.visual_blocks=true; t.touch(); ui.close(); }
+                        if ui.button(label).clicked() { self.new_page_kind(1); let t=self.active_tab_mut(); t.page_title=label.into(); t.doc.text=content.into(); t.doc.markdown=true; t.workspace.visual_blocks=true; t.touch(); ui.close(); }
+                    }
+                    for template in self.preferences.templates.clone() {
+                        if ui.button(&template.name).clicked() { self.new_tab(); let t = self.active_tab_mut(); t.doc.moodboard = false; t.doc.markdown = true; t.workspace.visual_blocks = true; t.page_title = template.name; t.doc.text = template.text; t.touch(); ui.close(); }
                     }
                 });});
                 ui.add_space(16.0);
@@ -1186,7 +1185,7 @@ impl NotepadApp {
                         ui.label(egui::RichText::new(heading).font(egui::FontId::new(15.0,egui::FontFamily::Name(DEFAULT_BOLD_FAMILY.into()))));
                         for (i, depth) in tree_order(&self.tabs) {
                             let t = &self.tabs[i]; if t.workspace.trashed || t.doc.moodboard != board { continue; }
-                            if !query.is_empty() && !page_title(t).to_lowercase().contains(&query) && !t.doc.text.to_lowercase().contains(&query) { continue; }
+                            if !self.page_matches(t) { continue; }
                             let mut parent=t.page_parent; let mut hidden=false; let mut seen=HashSet::new();
                             while let Some(id)=parent { if !seen.insert(id) { break; } if self.design.collapsed.contains(&id) && query.is_empty() { hidden=true; break; } parent=self.tabs.iter().find(|t| t.doc.id==id).and_then(|t| t.page_parent); }
                             if hidden { continue; } self.navigation_row(ui,i,depth); count+=1;
@@ -1230,7 +1229,9 @@ impl NotepadApp {
                         }
                     }
                 }
-                let icon = if self.tabs[i].doc.moodboard {
+                let icon = if !self.tabs[i].workspace.icon.is_empty() {
+                    self.tabs[i].workspace.icon.as_str()
+                } else if self.tabs[i].doc.moodboard {
                     icons::IMAGE
                 } else {
                     icons::FILE_TEXT
@@ -1303,6 +1304,14 @@ impl NotepadApp {
                         egui::FontId::proportional(14.0),
                         color,
                     );
+                    let marker = self.tabs[i].workspace.color;
+                    if marker != [0, 0, 0] {
+                        ui.painter().circle_filled(
+                            rect.right_center() - egui::vec2(7.0, 0.0),
+                            3.0,
+                            egui::Color32::from_rgb(marker[0], marker[1], marker[2]),
+                        );
+                    }
                     if response.has_focus() {
                         ui.painter().rect_stroke(
                             rect,
@@ -1348,8 +1357,7 @@ impl NotepadApp {
                             ui.close();
                         }
                         if ui.button("Déplacer vers la corbeille").clicked() {
-                            self.tabs[i].workspace.trashed = true;
-                            self.session_dirty = true;
+                            self.trash_page(id);
                             ui.close();
                         }
                     });
@@ -1393,7 +1401,7 @@ impl NotepadApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button(format!("{} Exporter", icons::EXPORT), |ui| {
                     let formats: &[&str] = if self.active_tab().doc.moodboard {
-                        &["json"]
+                        &["json", "png", "jpg"]
                     } else {
                         &["md", "html", "pdf"]
                     };
@@ -1426,17 +1434,22 @@ impl NotepadApp {
         let _ = ctx;
     }
 
-    fn export_page(&mut self, ext: &str, ctx: &egui::Context) {
+    pub(crate) fn export_page(&mut self, ext: &str, _ctx: &egui::Context) {
+        if ext == "png" || ext == "jpg" {
+            self.options.export_target = Some(self.active_tab().doc.id);
+            self.options.board_export = Some(ext.into());
+            return;
+        }
         if let Some(path) = rfd::FileDialog::new().add_filter(ext, &[ext]).save_file() {
             let t = self.active_tab();
             let result = if ext == "json" {
-                workspace_io::portable(self.session_snapshot(ctx))
-                    .and_then(|s| {
-                        serde_json::to_vec_pretty(&s.tabs[self.active].mood_items)
-                            .map_err(std::io::Error::other)
-                    })
-                    .and_then(|data| std::fs::write(path, data))
-                    .map_err(|e| e.to_string())
+                workspace_io::portable(Session {
+                    tabs: vec![tab_snapshot(t)],
+                    ..Default::default()
+                })
+                .and_then(|s| serde_json::to_vec_pretty(&s.tabs[0]).map_err(std::io::Error::other))
+                .and_then(|data| std::fs::write(path, data))
+                .map_err(|e| e.to_string())
             } else if ext == "pdf" {
                 pdf_export::export(&path, &page_title(t), &t.doc.text)
             } else {
@@ -1455,25 +1468,23 @@ impl NotepadApp {
     }
 
     pub(crate) fn contextual_inspector(&mut self, ui: &mut egui::Ui) {
-        if self.design.settings {
-            self.workspace_tools(ui, &ui.ctx().clone());
+        let mood = self.active_tab().doc.moodboard;
+        if self.options.concentration && !mood {
             return;
         }
-        let mood = self.active_tab().doc.moodboard;
-        if !self.design.inspector
-            && !(mood && self.selected_mood_item.is_some())
-            && self.design.selected_block.is_none()
-        {
+        if !self.design.inspector && !mood && self.design.selected_block.is_none() {
             return;
         }
         // At small widths properties use an explicit window instead of squeezing the editor.
-        let narrow = ui.available_width() < 740.0;
+        let narrow = !mood && ui.available_width() < 740.0;
         if narrow {
             let ctx = ui.ctx().clone();
             let mut open = true;
             egui::Window::new("Propriétés")
+                .order(egui::Order::Foreground)
                 .open(&mut open)
-                .default_width(260.0)
+                .default_width(320.0)
+                .vscroll(true)
                 .show(&ctx, |ui| self.inspector_contents(ui));
             if !open {
                 self.design.inspector = false;
@@ -1481,9 +1492,9 @@ impl NotepadApp {
             }
         } else {
             egui::Panel::right("contextual-inspector")
-                .default_size(260.0)
-                .min_size(220.0)
-                .max_size(320.0)
+                .default_size(if mood { 360.0 } else { 260.0 })
+                .min_size(240.0)
+                .max_size(420.0)
                 .resizable(true)
                 .frame(
                     egui::Frame::NONE
@@ -1491,7 +1502,21 @@ impl NotepadApp {
                         .inner_margin(egui::Margin::same(20)),
                 )
                 .show(ui, |ui| {
+                    if mood {
+                        ui.strong("Accès rapide aux propriétés");
+                        ui.horizontal_wrapped(|ui| {
+                            for title in ["Élément sélectionné", "Canevas", "Grille et alignement", "Vue", "Calques et ajout", "Export"] {
+                                if ui.small_button(title).clicked() { self.design.inspector_section=Some(title); }
+                            }
+                        });
+                        ui.separator();
+                        if let Some(target)=self.design.inspector_section.take() {
+                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("moodboard-section-target"),(target, 4_u8)));
+                        }
+                    }
                     egui::ScrollArea::vertical()
+                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                        .animated(false)
                         .id_salt("inspector-scroll")
                         .show(ui, |ui| self.inspector_contents(ui));
                 });
@@ -1503,7 +1528,7 @@ impl NotepadApp {
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(if self.active_tab().doc.moodboard {
-                        "Élément sélectionné"
+                        "Moodboard"
                     } else if self.design.selected_block.is_some() {
                         "Bloc sélectionné"
                     } else {
@@ -1516,10 +1541,11 @@ impl NotepadApp {
                 )
                 .truncate(),
             );
-            if ui
-                .small_button(icons::X)
-                .on_hover_text("Fermer les propriétés")
-                .clicked()
+            if !self.active_tab().doc.moodboard
+                && ui
+                    .small_button(icons::X)
+                    .on_hover_text("Fermer les propriétés")
+                    .clicked()
             {
                 self.design.inspector = false;
                 self.selected_mood_item = None;
@@ -1528,11 +1554,32 @@ impl NotepadApp {
         });
         ui.add_space(20.0);
         let mut changed = false;
+        if self.active_tab().workspace.read_only {
+            ui.label("Page en lecture seule.");
+            if ui
+                .button("Autoriser les modifications de cette page")
+                .clicked()
+            {
+                self.active_tab_mut().workspace.read_only = false;
+                self.session_dirty = true;
+            }
+            return;
+        }
         if self.active_tab().doc.moodboard {
+            ui.small("Réglages appliqués immédiatement · Faites défiler pour tout voir.");
+            ui.separator();
+            moodboard_panel::section_heading(ui, "Élément sélectionné");
             let Some(i) = self.selected_mood_item else {
-                ui.label("Sélectionnez une note ou une image.");
+                ui.label("Sélectionnez une note ou une image pour modifier sa position, ses dimensions, sa couleur et son lien.");
+                self.moodboard_properties_ui(ui);
                 return;
             };
+            let mut duplicate = false;
+            let mut remove = false;
+            ui.horizontal_wrapped(|ui| {
+                duplicate = ui.button("Dupliquer").clicked();
+                remove = ui.button("Supprimer").clicked();
+            });
             if let Some(texture) = self.tabs[self.active]
                 .mood_items
                 .get(i)
@@ -1544,23 +1591,49 @@ impl NotepadApp {
                 ui.image((texture.id(), egui::vec2(w, w * aspect)));
                 ui.add_space(16.0);
             }
-            let mut duplicate = false;
-            let mut remove = false;
             let mut replace = false;
             let mut front = false;
             let mut back = false;
+            let canvas_size = self.tabs[self.active].workspace.canvas_size;
             if let Some(item) = self.tabs[self.active].mood_items.get_mut(i) {
+                changed |= ui
+                    .checkbox(&mut item.locked, "Verrouiller sur la toile")
+                    .changed();
+                changed |= ui.checkbox(&mut item.hidden, "Masquer l’élément").changed();
+                changed |= ui
+                    .checkbox(&mut item.keep_ratio, "Conserver les proportions")
+                    .changed();
+                ui.label("Position (px)");
+                ui.horizontal(|ui| {
+                    ui.label("X");
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut item.x).range(0.0..=16384.0))
+                        .changed();
+                    ui.label("Y");
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut item.y).range(0.0..=16384.0))
+                        .changed();
+                });
                 ui.label("Dimensions");
+                let old_size = [item.width, item.height];
                 ui.horizontal(|ui| {
                     ui.label("L");
                     changed |= ui
-                        .add(egui::DragValue::new(&mut item.width).range(100.0..=1600.0))
+                        .add(egui::DragValue::new(&mut item.width).range(20.0..=16384.0))
                         .changed();
                     ui.label("H");
                     changed |= ui
-                        .add(egui::DragValue::new(&mut item.height).range(80.0..=1200.0))
+                        .add(egui::DragValue::new(&mut item.height).range(20.0..=16384.0))
                         .changed();
                 });
+                if item.keep_ratio && old_size[0] > 0.0 && old_size[1] > 0.0 {
+                    if item.width != old_size[0] {
+                        item.height = item.width * old_size[1] / old_size[0];
+                    } else if item.height != old_size[1] {
+                        item.width = item.height * old_size[0] / old_size[1];
+                    }
+                }
+                changed |= moodboard_panel::element_alignment_ui(ui, item, canvas_size);
                 ui.add_space(12.0);
                 if item.image_path.is_none() {
                     ui.label("Couleur");
@@ -1572,8 +1645,19 @@ impl NotepadApp {
                         }
                     });
                 }
+                if item.image_path.is_none() {
+                    ui.label("Texte de la note");
+                    changed |= ui
+                        .add(
+                            egui::TextEdit::multiline(&mut item.text)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(3),
+                        )
+                        .changed();
+                }
                 ui.add_space(12.0);
-                ui.collapsing("Lien", |ui| {
+                ui.strong("Lien");
+                ui.scope(|ui| {
                     changed |= ui
                         .add(
                             egui::TextEdit::singleline(item.link.get_or_insert_with(String::new))
@@ -1592,8 +1676,6 @@ impl NotepadApp {
                     front = ui.button("Avant").clicked();
                 });
                 ui.add_space(16.0);
-                duplicate = ui.button("Dupliquer").clicked();
-                remove = ui.button("Supprimer").clicked();
             }
             if replace {
                 if let Some(path) = rfd::FileDialog::new()
@@ -1632,6 +1714,7 @@ impl NotepadApp {
                 self.selected_mood_item = Some(j);
                 changed = true;
             }
+            self.moodboard_properties_ui(ui);
         } else if let Some(index) = self.design.selected_block {
             let mut chunks = blocks::split(&self.active_tab().doc.text);
             if let Some(chunk) = chunks.get_mut(index) {
@@ -1690,15 +1773,51 @@ impl NotepadApp {
         } else {
             let tab = &mut self.tabs[self.active];
             changed |= ui.checkbox(&mut tab.workspace.favorite, "Favori").changed();
-            changed |= ui.checkbox(&mut tab.workspace.pinned, "Épinglée").changed();
+            changed |= ui
+                .checkbox(&mut tab.workspace.read_only, "Lecture seule")
+                .changed();
+            ui.label("Icône");
+            ui.horizontal_wrapped(|ui| {
+                for (value, label) in [
+                    ("", "Automatique"),
+                    (icons::STAR, "Étoile"),
+                    (icons::FILE_TEXT, "Note"),
+                    (icons::IMAGE, "Image"),
+                ] {
+                    changed |= ui
+                        .selectable_value(&mut tab.workspace.icon, value.into(), label)
+                        .changed();
+                }
+            });
+            ui.label("Couleur de repère");
+            changed |= ui
+                .color_edit_button_srgb(&mut tab.workspace.color)
+                .changed();
+            let mut own_width = tab.workspace.reading_width.is_some();
+            if ui
+                .checkbox(&mut own_width, "Largeur de lecture propre à cette page")
+                .changed()
+            {
+                tab.workspace.reading_width = own_width.then_some(self.preferences.reading_width);
+                changed = true;
+            }
+            if let Some(width) = &mut tab.workspace.reading_width {
+                changed |= ui
+                    .add(
+                        egui::DragValue::new(width)
+                            .range(300.0..=2400.0)
+                            .suffix(" pt"),
+                    )
+                    .changed();
+            }
             ui.add_space(16.0);
             ui.label("Nom de la page");
-            let old = page_title(tab);
-            let mut title = old.clone();
-            if ui.text_edit_singleline(&mut title).changed() {
-                tab.workspace.aliases.push(old);
-                tab.page_title = title;
-                changed = true;
+            ui.label(page_title(tab));
+            if ui.button("Renommer…").clicked() {
+                self.design.rename = Some(tab.doc.id);
+                self.design.rename_draft = page_title(tab);
+                self.design.sidebar = true;
+                self.design.mobile_navigation = true;
             }
             ui.add_space(16.0);
             ui.label("Liens de cette page");
@@ -1711,9 +1830,36 @@ impl NotepadApp {
                     }
                 }
             }
+            ui.separator();
+            ui.label("Liens entrants");
+            let current = self.active;
+            let backlinks: Vec<_> = self
+                .tabs
+                .iter()
+                .enumerate()
+                .filter(|(i, t)| {
+                    *i != current
+                        && !t.workspace.trashed
+                        && wiki_targets(&t.doc.text)
+                            .iter()
+                            .any(|target| resolve_page(&self.tabs, target) == Some(current))
+                })
+                .map(|(i, t)| (i, page_title(t)))
+                .collect();
+            if backlinks.is_empty() {
+                ui.small("Aucune autre page ne pointe vers cette page.");
+            }
+            for (i, title) in backlinks {
+                if ui.link(title).clicked() {
+                    self.active = i;
+                    self.pending_focus = true;
+                }
+            }
         }
         if changed {
-            self.active_tab_mut().doc.dirty = true;
+            if self.active_tab().doc.moodboard || self.design.selected_block.is_some() {
+                self.active_tab_mut().doc.dirty = true;
+            }
             self.session_dirty = true;
         }
     }
@@ -1727,23 +1873,64 @@ impl NotepadApp {
             .open(&mut open)
             .default_width(430.0)
             .show(ctx, |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.options.trash_query)
+                        .hint_text("Rechercher dans la corbeille"),
+                );
+                if !self.options.undo_trash.is_empty()
+                    && ui
+                        .button("Annuler la dernière mise à la corbeille")
+                        .clicked()
+                {
+                    self.undo_trash();
+                }
                 let mut found = false;
-                for t in &mut self.tabs {
-                    if t.workspace.trashed {
+                let mut restore = None;
+                for t in &self.tabs {
+                    if t.workspace.trashed
+                        && page_title(t)
+                            .to_lowercase()
+                            .contains(&self.options.trash_query.to_lowercase())
+                    {
                         found = true;
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label(page_title(t));
-                            if ui.button("Restaurer").clicked() {
-                                t.workspace.trashed = false;
-                                self.session_dirty = true;
+                            ui.small(t.workspace.trashed_at.as_deref().unwrap_or("Date inconnue"));
+                            if ui.button("Restaurer avec les sous-pages").clicked() {
+                                restore = Some(t.doc.id);
+                            }
+                            if ui.button("Supprimer définitivement…").clicked() {
+                                self.options.purge_page = Some(t.doc.id);
                             }
                         });
                     }
                 }
+                if let Some(id) = restore {
+                    self.restore_trash(id);
+                }
                 if !found {
-                    ui.label("La corbeille est vide.");
+                    ui.label("Aucune page dans la corbeille pour cette recherche.");
                 }
             });
         self.design.trash = open;
+        if let Some(id) = self.options.purge_page {
+            let ids: Vec<_> = self
+                .tabs
+                .iter()
+                .filter(|t| t.workspace.trashed && self.is_descendant(t.doc.id, id))
+                .map(|t| t.doc.id)
+                .collect();
+            egui::Modal::new(egui::Id::unique("purge-pages-confirmation")).show(ctx, |ui| {
+                ui.heading("Suppression définitive");
+                ui.label(format!("Supprimer {} page(s) et leur historique de cet espace ? Les fichiers externes, sauvegardes et copies synchronisées ne seront pas effacés. Cette action ne peut pas être annulée.",ids.len()));
+                if ui.button("Supprimer définitivement ces pages").clicked() {
+                    self.tabs.retain(|t|!ids.contains(&t.doc.id));
+                    for t in &mut self.tabs { if t.page_parent.is_some_and(|p|ids.contains(&p)) { t.page_parent = None; } }
+                    if self.tabs.is_empty() { self.new_tab(); } self.active = self.active.min(self.tabs.len()-1);
+                    self.options.purge_page = None; self.session_dirty = true;
+                }
+                if ui.button("Annuler").clicked() { self.options.purge_page = None; }
+            });
+        }
     }
 }
