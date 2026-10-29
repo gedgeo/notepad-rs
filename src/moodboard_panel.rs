@@ -2,15 +2,18 @@
 use super::*;
 
 pub(crate) fn section_heading(ui: &mut egui::Ui, title: &str) {
-    let response=ui.strong(title);
-    let id=egui::Id::unique("moodboard-section-target");
-    if let Some((target,remaining))=ui.ctx().data(|d|d.get_temp::<(&'static str,u8)>(id)) {
-        if target==title {
+    let response = ui.strong(title);
+    let id = egui::Id::unique("moodboard-section-target");
+    if let Some((target, remaining)) = ui.ctx().data(|d| d.get_temp::<(&'static str, u8)>(id)) {
+        if target == title {
             response.scroll_to_me(Some(egui::Align::Min));
             // Reapply briefly while lazy image previews establish their final height.
             ui.ctx().data_mut(|d| {
-                if remaining>1 { d.insert_temp(id,(target,remaining-1)); }
-                else { d.remove::<(&'static str,u8)>(id); }
+                if remaining > 1 {
+                    d.insert_temp(id, (target, remaining - 1));
+                } else {
+                    d.remove::<(&'static str, u8)>(id);
+                }
             });
         }
     }
@@ -25,6 +28,79 @@ fn section(ui: &mut egui::Ui, title: &str, contents: impl FnOnce(&mut egui::Ui))
 }
 
 impl NotepadApp {
+    pub(crate) fn moodboard_read_only_overview(&mut self, ui: &mut egui::Ui) {
+        let workspace = &self.active_tab().workspace;
+        section(ui, "Canevas", |ui| {
+            match workspace.canvas_size {
+                Some([w, h]) => {
+                    ui.label(format!("Format · {w} × {h} px"));
+                }
+                None => {
+                    ui.label("Format · canevas libre");
+                }
+            }
+            ui.label(if workspace.canvas_appearance.hide_border {
+                "Cadre · masqué"
+            } else {
+                "Cadre · visible"
+            });
+        });
+        let appearance = &workspace.canvas_appearance;
+        let grid = appearance.grid.unwrap_or(self.preferences.grid);
+        let grid_size = appearance.grid_size.unwrap_or(self.preferences.grid_size);
+        section(ui, "Grille et alignement", |ui| {
+            ui.label(if grid {
+                "Grille · visible"
+            } else {
+                "Grille · masquée"
+            });
+            ui.label(format!("Espacement · {grid_size:.0} px"));
+        });
+        section(ui, "Vue", |ui| {
+            let mut percent = self.design.board_zoom * 100.0;
+            ui.horizontal(|ui| {
+                let label = ui.label("Zoom");
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut percent)
+                            .range(2.0..=250.0)
+                            .suffix(" %"),
+                    )
+                    .labelled_by(label.id)
+                    .changed()
+                {
+                    self.design.board_zoom = percent / 100.0;
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Ajuster le canevas").clicked() {
+                    self.design.board_fit_requested = true;
+                }
+                if ui.button("Vue à 100 %").clicked() {
+                    self.design.board_zoom = 1.0;
+                    self.design.board_pan = egui::vec2(8.0, 8.0);
+                }
+            });
+        });
+        section(ui, "Calques et ajout", |ui| {
+            ui.label(format!("{} élément(s)", self.active_tab().mood_items.len()));
+            ui.small("Déverrouillez la page pour modifier les calques ou ajouter du contenu.");
+        });
+        section(ui, "Export", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for (label, ext) in [
+                    ("Image PNG", "png"),
+                    ("Image JPEG", "jpg"),
+                    ("Moodboard JSON", "json"),
+                ] {
+                    if ui.button(label).clicked() {
+                        self.export_page(ext, &ui.ctx().clone());
+                    }
+                }
+            });
+        });
+    }
+
     pub(crate) fn moodboard_properties_ui(&mut self, ui: &mut egui::Ui) {
         let before = serde_json::to_vec(&self.active_tab().workspace).ok();
         section(ui, "Canevas", |ui| {

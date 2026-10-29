@@ -21,6 +21,7 @@ pub struct State {
     pub mobile_navigation: bool,
     pub inspector: bool,
     pub inspector_section: Option<&'static str>,
+    pub inspector_active_section: &'static str,
     pub settings: bool,
     pub trash: bool,
     pub rename: Option<u64>,
@@ -39,10 +40,11 @@ impl Default for State {
     fn default() -> Self {
         Self {
             sidebar: true,
-            sidebar_width: 256.0,
+            sidebar_width: 248.0,
             mobile_navigation: false,
             inspector: false,
             inspector_section: None,
+            inspector_active_section: "Élément sélectionné",
             settings: false,
             trash: false,
             rename: None,
@@ -91,7 +93,23 @@ pub fn apply(ctx: &egui::Context) {
         };
         style.visuals.selection.stroke = egui::Stroke::new(1.0, accent);
         style.visuals.hyperlink_color = accent;
-        if !style.visuals.dark_mode {
+        if style.visuals.dark_mode {
+            let graphite = egui::Color32::from_rgb(23, 25, 29);
+            let panel = egui::Color32::from_rgb(32, 35, 41);
+            let control = egui::Color32::from_rgb(42, 46, 54);
+            style.visuals.override_text_color = Some(egui::Color32::from_rgb(235, 238, 243));
+            style.visuals.panel_fill = panel;
+            style.visuals.window_fill = panel;
+            style.visuals.faint_bg_color = graphite;
+            style.visuals.extreme_bg_color = egui::Color32::from_rgb(18, 20, 24);
+            style.visuals.widgets.noninteractive.bg_stroke =
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(54, 59, 68));
+            style.visuals.widgets.inactive.weak_bg_fill = control;
+            style.visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+            style.visuals.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(52, 58, 68);
+            style.visuals.widgets.active.weak_bg_fill = BLUE;
+            style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, BLUE);
+        } else {
             style.visuals.override_text_color = Some(INK);
             style.visuals.panel_fill = egui::Color32::WHITE;
             style.visuals.window_fill = egui::Color32::WHITE;
@@ -592,9 +610,13 @@ impl NotepadApp {
                 .on_hover_text("Sélectionner");
             ui.selectable_value(&mut self.design.board_hand, true, icons::HAND)
                 .on_hover_text("Déplacer le canevas");
-            if ui.button("Propriétés du moodboard").clicked() {
+            if ui
+                .button(format!("{} Canevas", icons::SLIDERS_HORIZONTAL))
+                .clicked()
+            {
                 self.design.inspector = true;
                 self.design.inspector_section = Some("Canevas");
+                self.design.inspector_active_section = "Canevas";
             }
             if let Some([w, h]) = self.active_tab().workspace.canvas_size {
                 ui.colored_label(secondary(ui), format!("{w} × {h} px"));
@@ -1007,8 +1029,15 @@ impl NotepadApp {
                 self.active_tab_mut().workspace.canvas_size = Some([1920, 1080]);
             }
             self.selected_mood_tab = Some(self.active_tab().doc.id);
-            self.selected_mood_item = Some(if mode.contains("note-selection") { 3 } else { 0 });
-            if mode.contains("properties") { self.design.inspector_section=Some("Canevas"); }
+            self.selected_mood_item = Some(if mode.contains("note-selection") {
+                3
+            } else {
+                0
+            });
+            if mode.contains("properties") {
+                self.design.inspector_section = Some("Canevas");
+                self.design.inspector_active_section = "Canevas";
+            }
             self.design.board_zoom = 0.8;
         }
         for tab in &mut self.tabs {
@@ -1492,30 +1521,61 @@ impl NotepadApp {
             }
         } else {
             egui::Panel::right("contextual-inspector")
-                .default_size(if mood { 360.0 } else { 260.0 })
-                .min_size(240.0)
-                .max_size(420.0)
+                .default_size(if mood { 340.0 } else { 260.0 })
+                .min_size(if mood { 280.0 } else { 240.0 })
+                .max_size(if mood { 380.0 } else { 420.0 })
                 .resizable(true)
                 .frame(
                     egui::Frame::NONE
                         .fill(ui.visuals().panel_fill)
-                        .inner_margin(egui::Margin::same(20)),
+                        .inner_margin(egui::Margin::same(14)),
                 )
                 .show(ui, |ui| {
                     if mood {
-                        ui.strong("Accès rapide aux propriétés");
                         ui.horizontal_wrapped(|ui| {
-                            for title in ["Élément sélectionné", "Canevas", "Grille et alignement", "Vue", "Calques et ajout", "Export"] {
-                                if ui.small_button(title).clicked() { self.design.inspector_section=Some(title); }
+                            ui.label(
+                                egui::RichText::new("PROPRIÉTÉS")
+                                    .size(11.0)
+                                    .color(secondary(ui)),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                egui::RichText::new("Ce moodboard · modifications immédiates")
+                                    .size(11.0)
+                                    .color(secondary(ui)),
+                            );
+                        });
+                        ui.add_space(6.0);
+                        ui.horizontal_wrapped(|ui| {
+                            for (label, title) in [
+                                ("Élément", "Élément sélectionné"),
+                                ("Canevas", "Canevas"),
+                                ("Grille", "Grille et alignement"),
+                                ("Vue", "Vue"),
+                                ("Calques", "Calques et ajout"),
+                                ("Export", "Export"),
+                            ] {
+                                let selected = self.design.inspector_active_section == title;
+                                if ui.selectable_label(selected, label).clicked() {
+                                    self.design.inspector_active_section = title;
+                                    self.design.inspector_section = Some(title);
+                                }
                             }
                         });
                         ui.separator();
-                        if let Some(target)=self.design.inspector_section.take() {
-                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("moodboard-section-target"),(target, 4_u8)));
+                        if let Some(target) = self.design.inspector_section.take() {
+                            ui.ctx().data_mut(|d| {
+                                d.insert_temp(
+                                    egui::Id::unique("moodboard-section-target"),
+                                    (target, 4_u8),
+                                )
+                            });
                         }
                     }
                     egui::ScrollArea::vertical()
-                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
+                        )
                         .animated(false)
                         .id_salt("inspector-scroll")
                         .show(ui, |ui| self.inspector_contents(ui));
@@ -1555,13 +1615,16 @@ impl NotepadApp {
         ui.add_space(20.0);
         let mut changed = false;
         if self.active_tab().workspace.read_only {
-            ui.label("Page en lecture seule.");
+            ui.colored_label(secondary(ui), "Lecture seule · les réglages sont protégés.");
             if ui
-                .button("Autoriser les modifications de cette page")
+                .button(format!("{} Autoriser les modifications", icons::LOCK_OPEN))
                 .clicked()
             {
                 self.active_tab_mut().workspace.read_only = false;
                 self.session_dirty = true;
+            }
+            if self.active_tab().doc.moodboard {
+                self.moodboard_read_only_overview(ui);
             }
             return;
         }
@@ -1586,9 +1649,14 @@ impl NotepadApp {
                 .and_then(|item| item.image_path.as_ref())
                 .and_then(|path| self.design.textures.get(path))
             {
-                let w = ui.available_width().min(220.0);
+                let mut w = ui.available_width().min(220.0);
                 let aspect = texture.size()[1] as f32 / texture.size()[0] as f32;
-                ui.image((texture.id(), egui::vec2(w, w * aspect)));
+                let mut h = w * aspect;
+                if h > 120.0 {
+                    h = 120.0;
+                    w = h / aspect.max(0.01);
+                }
+                ui.image((texture.id(), egui::vec2(w, h)));
                 ui.add_space(16.0);
             }
             let mut replace = false;
@@ -1603,27 +1671,47 @@ impl NotepadApp {
                 changed |= ui
                     .checkbox(&mut item.keep_ratio, "Conserver les proportions")
                     .changed();
-                ui.label("Position (px)");
+                ui.label("Position");
                 ui.horizontal(|ui| {
-                    ui.label("X");
+                    let x_label = ui.label("X");
                     changed |= ui
-                        .add(egui::DragValue::new(&mut item.x).range(0.0..=16384.0))
+                        .add(
+                            egui::DragValue::new(&mut item.x)
+                                .range(0.0..=16384.0)
+                                .suffix(" px"),
+                        )
+                        .labelled_by(x_label.id)
                         .changed();
-                    ui.label("Y");
+                    let y_label = ui.label("Y");
                     changed |= ui
-                        .add(egui::DragValue::new(&mut item.y).range(0.0..=16384.0))
+                        .add(
+                            egui::DragValue::new(&mut item.y)
+                                .range(0.0..=16384.0)
+                                .suffix(" px"),
+                        )
+                        .labelled_by(y_label.id)
                         .changed();
                 });
                 ui.label("Dimensions");
                 let old_size = [item.width, item.height];
                 ui.horizontal(|ui| {
-                    ui.label("L");
+                    let width_label = ui.label("L");
                     changed |= ui
-                        .add(egui::DragValue::new(&mut item.width).range(20.0..=16384.0))
+                        .add(
+                            egui::DragValue::new(&mut item.width)
+                                .range(20.0..=16384.0)
+                                .suffix(" px"),
+                        )
+                        .labelled_by(width_label.id)
                         .changed();
-                    ui.label("H");
+                    let height_label = ui.label("H");
                     changed |= ui
-                        .add(egui::DragValue::new(&mut item.height).range(20.0..=16384.0))
+                        .add(
+                            egui::DragValue::new(&mut item.height)
+                                .range(20.0..=16384.0)
+                                .suffix(" px"),
+                        )
+                        .labelled_by(height_label.id)
                         .changed();
                 });
                 if item.keep_ratio && old_size[0] > 0.0 && old_size[1] > 0.0 {
@@ -1672,8 +1760,8 @@ impl NotepadApp {
                 ui.add_space(20.0);
                 ui.label("Disposition");
                 ui.horizontal(|ui| {
-                    back = ui.button("Arrière").clicked();
-                    front = ui.button("Avant").clicked();
+                    back = ui.button("Arrière-plan").clicked();
+                    front = ui.button("Premier plan").clicked();
                 });
                 ui.add_space(16.0);
             }
